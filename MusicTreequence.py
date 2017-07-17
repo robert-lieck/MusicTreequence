@@ -241,7 +241,7 @@ class Event(object):
             return converter.parse("tinynotation: " + Event.generation_output).show()
         elif Event.generation_mode == GenMode.SONICPI:
             with open(Event.generation_output_file, 'w') as file:
-                file.write("use_synth :fm\n")
+                file.write("use_synth :fm\nuse_bpm 60\n")
                 file.write(Event.generation_output)
         else:
             raise UserWarning("Unknown mode '{}'".format(Event.generation_mode))
