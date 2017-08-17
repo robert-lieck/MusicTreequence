@@ -1,6 +1,7 @@
 import io
 import random
 import string
+import collections
 
 def to_MIDI_pitch(pitch):
     """map to midi pitch"""
@@ -77,7 +78,7 @@ class Event(object):
             print("  ", end="", file=file)
 
     @staticmethod
-    def get_extent(extent):
+    def time_interval(extent):
         if isinstance(extent, str):
             if extent.endswith("sec"):
                 # sec
@@ -89,9 +90,9 @@ class Event(object):
                 # beats --> sec
                 return float(extent[:-1]) * Event.beat
             elif '/' in extent:
-                # beat fraction x/y --> sec
+                # x/y --> sec [1/4 = 1 beat]
                 parts = extent.split('/')
-                return float(parts[0]) / float(parts[1]) * Event.beat
+                return 4 * float(parts[0]) / float(parts[1]) * Event.beat
             else:
                 # --> sec
                 return float(extent)
@@ -103,7 +104,7 @@ class Event(object):
     def set_beat(beat):
         if isinstance(beat, str):
             if beat.endswith('bpm'):
-                Event.beat = float(60000 / float(beat[:-3]))
+                Event.beat = float(60 / float(beat[:-3]))
             else:
                 Event.beat = float(beat)
         else:
@@ -128,6 +129,37 @@ class Event(object):
             print(function, file=file)
             print("", file=file)
 
+    @staticmethod
+    def parse_event(event):
+        if isinstance(event, str):
+            # string should be single event or sequence of events separated by whitespace
+            list = event.split()
+            if len(list) > 1:
+                # sequence
+                sequence = []
+                for e in list:
+                    sequence.append(Event.parse_event(e))
+                return Sequence(sequence)
+            else:
+                # single event
+                vals = event.split('/')
+                length = "1b"
+                if len(vals) > 1:
+                    length = "1/" + vals[1]
+                if vals[0] == 'r' or vals[0] == 'R':
+                    return Rest(length)
+                else:
+                    if vals[0].endswith("_"):
+                        pitch = vals[0][:-1]
+                        tie = True
+                    else:
+                        pitch = vals[0]
+                        tie = False
+                    return Tone(pitch=pitch, duration=length, tie=tie)
+        else:
+            # just pass through
+            return event
+
     def create_symbol(self, symbol):
         function_name = Event.random_string()
         with io.StringIO() as file:
@@ -148,22 +180,26 @@ class Event(object):
 
 class Tone(Event):
 
-    def __init__(self, pitch, duration, extent=None, amplitude=1., symbol=None):
-        self.pitch = pitch
-        self.duration = duration
+    def __init__(self, pitch, duration, extent=None, amplitude=1., symbol=None, tie=False):
+        self._pitch = pitch
+        self._duration = duration
         self._extent = duration if extent is None else extent
-        self.amplitude = amplitude
+        self._amplitude = amplitude
+        self._tie = tie
         if symbol is not None:
             self.create_symbol(symbol)
 
+    def __str__(self):
+        return "{}:{}({}):{}{}".format(self._pitch, self._duration, self._extent, self._amplitude, ("" if not self._tie else "_"))
+
     def extent(self):
-        return Event.get_extent(self._extent)
+        return Event.time_interval(self._extent)
 
     def write(self, file):
         Event.write_indent(file)
-        print("tone pitch: {}, duration: {}, amp: {}".format(to_MIDI_pitch(self.pitch),
-                                                             Event.get_extent(self.duration),
-                                                             self.amplitude),
+        print("tone pitch: {}, duration: {}, amp: {}".format(to_MIDI_pitch(self._pitch),
+                                                             Event.time_interval(self._duration),
+                                                             self._amplitude),
               file=file)
 
 
@@ -171,48 +207,113 @@ class Beat(Event):
 
     def __init__(self, extent=0., amplitude=1., symbol=None):
         self._extent = extent
-        self.amplitude = amplitude
+        self._amplitude = amplitude
         if symbol is not None:
             self.create_symbol(symbol)
 
+    def __str__(self):
+        return "beat:{}:{}".format(self._extent, self._amplitude)
+
     def extent(self):
-        return Event.get_extent(self._extent)
+        return Event.time_interval(self._extent)
 
     def write(self, file):
         Event.write_indent(file)
-        print("play_beat amp: {}".format(self.amplitude), file=file)
+        print("play_beat amp: {}".format(self._amplitude), file=file)
 
-class Break(Event):
+
+class Rest(Event):
     def __init__(self, extent, symbol=None):
         self._extent = extent
         if symbol is not None:
             self.create_symbol(symbol)
 
+    def __str__(self):
+        return "r:{}".format(self._extent)
+
     def extent(self):
-        return Event.get_extent(self._extent)
+        return Event.time_interval(self._extent)
 
     def write(self, file):
         pass
 
 
 class Sequence(Event):
+
+    @staticmethod
+    def flatten(sequence):
+        for event in sequence:
+            if isinstance(event, collections.Iterable) and not isinstance(event, (str, bytes)):
+                yield from Sequence.flatten(event)
+            elif isinstance(event, Sequence):
+                yield from event._sequence
+            else:
+                yield event
+
     def __init__(self, sequence, symbol=None):
-        self.sequence = sequence
+        self._sequence = [event for event in Sequence.flatten(sequence)]
         if symbol is not None:
             self.create_symbol(symbol)
 
+    def __str__(self):
+        s = "["
+        first = True
+        for e in Sequence.flatten(self._sequence):
+            if first:
+                first = False
+            else:
+                s += ", "
+            s += str(e)
+        s += "]"
+        return s
+
     def extent(self):
         extent = 0
-        for event in self.sequence:
+        for event in self._sequence:
             extent += event.extent()
         return extent
 
     def write(self, file):
-        for event in self.sequence:
+        tie_extent = 0
+        for i in range(len(self._sequence)):
+            event = self._sequence[i]
+            if isinstance(event, Tone) \
+                    and event._tie \
+                    and i < len(self._sequence) - 1 \
+                    and isinstance(self._sequence[i+1], Tone) \
+                    and to_MIDI_pitch(self._sequence[i+1]._pitch) == to_MIDI_pitch(event._pitch):
+                tie_extent += event.extent()
+                print("tie +=", tie_extent)
+                continue
+            if tie_extent > 0:
+                print("tie:", tie_extent, " --> execute")
+                event._duration = tie_extent + Event.time_interval(event._duration)
+                event._extent = tie_extent + Event.time_interval(event._extent)
+                tie_extent = 0
             event.write(file=file)
-            if event.extent() > 0:
+            if event.extent() > 0 and not isinstance(event, Sequence):
                 Event.write_indent(file)
                 print("sleep {}".format(event.extent()), file=file)
+
+
+class Measure(Sequence):
+    def __init__(self, events, extent, unit='b', symbol=None):
+        if not isinstance(events, str) and not isinstance(events, Event):
+            sequence = []
+            part_extent = extent / len(events)
+            for e in events:
+                sequence.append(Measure(e, part_extent, unit=unit))
+        else:
+            e = Event.parse_event(events)
+            if isinstance(e, Tone):
+                e._duration = extent
+                e._extent = extent
+            elif isinstance(e, Rest):
+                e._extent = extent
+            else:
+                raise UserWarning("Don't know how to handle event:", e)
+            sequence = [e]
+        super(Measure, self).__init__(sequence, symbol=None)
 
 
 class Symbol(Event):
@@ -230,16 +331,25 @@ class Symbol(Event):
 if __name__ == "__main__":
     with io.StringIO() as file:
         # create events and write to string-file
-        Event.set_beat(1)
+        Event.set_beat("120bpm")
         print("def song", file=file)
         Event.indent += 1
-        Sequence([
-            Beat(extent="1/2", amplitude=0.5, symbol="A"),
-            Tone("e", "1/2", extent="1/2", amplitude=0.7, symbol="B"),
-            Beat(extent="1/2", amplitude=1., symbol="C"),
-            Break("1/2"),
-            Symbol("A"), Symbol("B"), Symbol("C")
-        ]).write(file=file)
+        ## takt
+        m = Measure(['d', 'd', 'f', ['g_', 'g_', "d'"], 'a', 'g', 'f', 'e'], 4, 'sec') # swing
+        m = Measure(['c', 'd', 'e', 'f', ['g', 'f'], ['e', 'd', 'c', 'B'], 'c'], 4)
+        m.write(file=file)
+        Event.parse_event('r r/1').write(file=file)
+        ## alle meine entchen
+        # Event.parse_event("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1").write(file=file)
+        ## basic beat
+        # Sequence([
+        #     Beat(extent="1/4", amplitude=0.5, symbol="A"),
+        #     Tone("e", "1/4", amplitude=0.7, symbol="B"),
+        #     Beat(extent="1/4", amplitude=1., symbol="C"),
+        #     Rest("1/4"),
+        #     Symbol("A"), Symbol("B"), Symbol("C")
+        # ]).write(file=file)
+        ##
         Event.indent -= 1
         print("end", file=file)
         print("", file=file)
