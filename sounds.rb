@@ -4,8 +4,7 @@ def tone(pitch:, duration:, amp:)
   play pitch, attack: 0.01, decay: duration, sustain: 0.1, release: 0.1, amp: amp
 end
 
-
-def play_beat(sample: :tabla_ghe1, amp: 1)
+def play_beat(smp: :tabla_ghe1, amp: 1)
   ##| :drum_cymbal_closed :drum_snare_soft :tabla_ghe1
-  sample sample, amp: amp
+  sample smp, amp: amp
 end

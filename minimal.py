@@ -71,6 +71,7 @@ class Event(object):
     indent = 0
     beat = 1
     symbols = {}
+    loops = set()
 
     @staticmethod
     def write_indent(file):
@@ -125,9 +126,27 @@ class Event(object):
     def write_symbols(file):
         print("# symbols", file=file)
         print("", file=file)
-        for function_name, extent, function in Event.symbols.values():
+        for function_name, function in Event.symbols.values():
             print(function, file=file)
             print("", file=file)
+
+    @staticmethod
+    def write_loops(file):
+        print("# function for testing infinite loops", file=file)
+        print("def loop_test(key)", file=file)
+        print("  loops = [", file=file)
+        for name in Event.loops:
+            print("    '{}',".format(name), file=file)
+        print("  ].to_set", file=file)
+        print("  return loops.include?(key)", file=file)
+        print("end", file=file)
+
+    @staticmethod
+    def add_loop(name):
+        if name in Event.loops:
+            raise UserWarning("Loop '{}' already exists".format(name))
+        else:
+            Event.loops.add(name)
 
     @staticmethod
     def parse_event(event):
@@ -169,7 +188,7 @@ class Event(object):
             self.write(file)
             print("end", end='', file=file)
             Event.indent = old_indent
-            Event.symbols[symbol] = (function_name, self.extent(), file.getvalue())
+            Event.symbols[symbol] = (function_name, file.getvalue())
 
     def extent(self):
         return 0
@@ -251,14 +270,14 @@ class Sequence(Event):
                 yield event
 
     def __init__(self, sequence, symbol=None):
-        self._sequence = [event for event in Sequence.flatten(sequence)]
+        self._sequence = list(Sequence.flatten(sequence))
         if symbol is not None:
             self.create_symbol(symbol)
 
     def __str__(self):
-        s = "["
+        s = "||["
         first = True
-        for e in Sequence.flatten(self._sequence):
+        for e in self._sequence:
             if first:
                 first = False
             else:
@@ -291,7 +310,7 @@ class Sequence(Event):
                 event._extent = tie_extent + Event.time_interval(event._extent)
                 tie_extent = 0
             event.write(file=file)
-            if event.extent() > 0 and not isinstance(event, Sequence):
+            if (isinstance(event, Tone) or isinstance(event, Beat) or isinstance(event, Rest)) and event.extent() > 0:
                 Event.write_indent(file)
                 print("sleep {}".format(event.extent()), file=file)
 
@@ -316,42 +335,119 @@ class Measure(Sequence):
         super(Measure, self).__init__(sequence, symbol=None)
 
 
+class Parallel(Event):
+    def __init__(self, events, symbol=None):
+        self.events = events
+        if symbol is not None:
+            self.create_symbol(symbol)
+
+    def __str__(self):
+        s = "==["
+        first = True
+        for e in self.events:
+            if first:
+                first = False
+            else:
+                s += ", "
+            s += str(e)
+        s += "]"
+        return s
+
+    def extent(self):
+        extent = 0
+        for event in self.events:
+            extent = max(extent, event.extent())
+        return extent
+
+    def write(self, file):
+        print("# parallel event not implemented yet", file=file)
+        # for event in self.events:
+        #     event.write(file=file)
+        #     if event.extent() > 0 and (isinstance(event, Tone) or isinstance(event, Beat) or isinstance(event, Rest)):
+        #         Event.write_indent(file)
+        #         print("sleep {}".format(event.extent()), file=file)
+
+
 class Symbol(Event):
 
     def __init__(self, symbol):
-        self.symbol = symbol
+        self._symbol = symbol
 
     def extent(self):
-        return Event.symbols[self.symbol][1]
+        raise UserWarning("Extent of symbol-event requested")
 
     def write(self, file):
         Event.write_indent(file)
-        print("{} # {}".format(Event.symbols[self.symbol][0], self.symbol), file=file)
+        print("{} # {}".format(Event.symbols[self._symbol][0], self._symbol), file=file)
+
+
+class Loop(Event):
+
+    def __init__(self, event, symbol=None, repeat=None, active=True):
+        self._symbol = symbol if symbol is not None else Event.random_string()
+        self._repeat = repeat
+        event.create_symbol(self._symbol)
+        self._symbol_event = Symbol(self._symbol)
+        if active:
+            Event.add_loop(self._symbol)
+
+    def extent(self):
+        raise UserWarning("Extent of loop-event requested")
+
+    def write(self, file):
+        Event.write_indent(file)
+        if self._repeat is None:
+            print("while loop_test('{}')".format(self._symbol), file=file)
+        else:
+            print("{}.times do".format(self._repeat), file=file)
+        Event.indent += 1
+        Event.write_indent(file)
+        print('''puts "restart {}loop '{}'"'''.format(
+            ('' if self._repeat is None else "{}-time-".format(self._repeat)),
+            self._symbol),
+            file=file)
+        self._symbol_event.write(file)
+        Event.indent -= 1
+        Event.write_indent(file)
+        print("end", file=file)
+
 
 if __name__ == "__main__":
     with io.StringIO() as file:
         # create events and write to string-file
         Event.set_beat("120bpm")
+        print("# main function", file=file)
         print("def song", file=file)
         Event.indent += 1
         ## takt
         m = Measure(['d', 'd', 'f', ['g_', 'g_', "d'"], 'a', 'g', 'f', 'e'], 4, 'sec') # swing
         m = Measure(['c', 'd', 'e', 'f', ['g', 'f'], ['e', 'd', 'c', 'B'], 'c'], 4)
-        m.write(file=file)
-        Event.parse_event('r r/1').write(file=file)
+        # m.write(file)
+        # Event.parse_event('r r/1').write(file)
         ## alle meine entchen
-        # Event.parse_event("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1").write(file=file)
+        # Event.parse_event("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1").write(file)
         ## basic beat
-        # Sequence([
-        #     Beat(extent="1/4", amplitude=0.5, symbol="A"),
-        #     Tone("e", "1/4", amplitude=0.7, symbol="B"),
-        #     Beat(extent="1/4", amplitude=1., symbol="C"),
-        #     Rest("1/4"),
-        #     Symbol("A"), Symbol("B"), Symbol("C")
-        # ]).write(file=file)
+        s1 = Sequence([
+            Beat(extent="1/4", amplitude=0.5),
+            Tone("e", "1/4", amplitude=0.7),
+            Beat(extent="1/4", amplitude=1.),
+            Rest("1/4")
+        ])
+        s2 = Sequence([
+            Beat(extent="1/4", amplitude=0.5),
+            Tone("f#", "1/4", amplitude=0.7),
+            Beat(extent="1/4", amplitude=1.),
+            Rest("1/4")
+        ])
+        # s.write(file)
+        l1 = Loop(s1, "a", repeat=3)
+        l2 = Loop(s2, "b", repeat=3)
+        Loop(Sequence([l1, l2]), "z").write(file)
         ##
         Event.indent -= 1
         print("end", file=file)
+        print("", file=file)
+        Event.write_loops(file)
         print("", file=file)
         Event.write_symbols(file)
         # write to sys out and real file

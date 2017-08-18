@@ -10,6 +10,7 @@ in_thread do
 end
 
 in_thread do
+  puts "restart 'song'"
   loop do
     song
     sleep 0.1
