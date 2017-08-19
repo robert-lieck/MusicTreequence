@@ -2,6 +2,7 @@ import io
 import random
 import string
 import collections
+from contextlib import contextmanager
 
 def to_MIDI_pitch(pitch):
     """map to midi pitch"""
@@ -65,6 +66,16 @@ def to_MIDI_pitch(pitch):
         except ValueError:
             return MIDI_pitch[pitch]
         return pitch
+    else:
+        raise UserWarning("Cannot interpret '{}' as pitch".format(pitch))
+
+
+@contextmanager
+def transposed(event, transpose):
+    event._transpose += transpose
+    yield None
+    event._transpose -= transpose
+
 
 class Event(object):
 
@@ -126,7 +137,7 @@ class Event(object):
     def write_symbols(file):
         print("# symbols", file=file)
         print("", file=file)
-        for function_name, function in Event.symbols.values():
+        for function_name, function, extent in Event.symbols.values():
             print(function, file=file)
             print("", file=file)
 
@@ -179,8 +190,13 @@ class Event(object):
             # just pass through
             return event
 
-    def create_symbol(self, symbol):
-        function_name = Event.random_string()
+    @staticmethod
+    def wait(time, file):
+        Event.write_indent(file=file)
+        print("sleep {}".format(time), file=file)
+
+    def create_symbol(self, symbol, random_name=False):
+        function_name = Event.random_string() if random_name else "function_"+symbol
         with io.StringIO() as file:
             old_indent = Event.indent
             print("def {} # {}".format(function_name, symbol), file=file)
@@ -188,7 +204,16 @@ class Event(object):
             self.write(file)
             print("end", end='', file=file)
             Event.indent = old_indent
-            Event.symbols[symbol] = (function_name, file.getvalue())
+            Event.symbols[symbol] = (function_name, file.getvalue(), self.extent())
+
+    def __init__(self, transpose=0):
+        self._transpose = transpose
+
+    def is_atomic(self):
+        return isinstance(self, (Tone, Beat, Rest)) or (isinstance(self, Transposed) and self._event.is_atomic())
+
+    def is_transposable(self):
+        return isinstance(self, (Tone, Sequence, Parallel, Transposed))
 
     def extent(self):
         return 0
@@ -199,7 +224,8 @@ class Event(object):
 
 class Tone(Event):
 
-    def __init__(self, pitch, duration, extent=None, amplitude=1., symbol=None, tie=False):
+    def __init__(self, pitch, duration='1/4', extent=None, amplitude=1., symbol=None, tie=False, transpose=0):
+        super(Tone, self).__init__(transpose=transpose)
         self._pitch = pitch
         self._duration = duration
         self._extent = duration if extent is None else extent
@@ -216,7 +242,7 @@ class Tone(Event):
 
     def write(self, file):
         Event.write_indent(file)
-        print("tone pitch: {}, duration: {}, amp: {}".format(to_MIDI_pitch(self._pitch),
+        print("tone pitch: {}, duration: {}, amp: {}".format(to_MIDI_pitch(self._pitch) + self._transpose,
                                                              Event.time_interval(self._duration),
                                                              self._amplitude),
               file=file)
@@ -225,6 +251,7 @@ class Tone(Event):
 class Beat(Event):
 
     def __init__(self, extent=0., amplitude=1., symbol=None):
+        super(Beat, self).__init__(transpose=0)
         self._extent = extent
         self._amplitude = amplitude
         if symbol is not None:
@@ -243,6 +270,7 @@ class Beat(Event):
 
 class Rest(Event):
     def __init__(self, extent, symbol=None):
+        super(Rest, self).__init__(transpose=0)
         self._extent = extent
         if symbol is not None:
             self.create_symbol(symbol)
@@ -269,8 +297,9 @@ class Sequence(Event):
             else:
                 yield event
 
-    def __init__(self, sequence, symbol=None):
-        self._sequence = list(Sequence.flatten(sequence))
+    def __init__(self, sequence, symbol=None, transpose=0):
+        super(Sequence, self).__init__(transpose=transpose)
+        self._sequence = Sequence.flatten(sequence)
         if symbol is not None:
             self.create_symbol(symbol)
 
@@ -286,6 +315,9 @@ class Sequence(Event):
         s += "]"
         return s
 
+    def get_sequence(self):
+        return self._sequence
+
     def extent(self):
         extent = 0
         for event in self._sequence:
@@ -294,13 +326,14 @@ class Sequence(Event):
 
     def write(self, file):
         tie_extent = 0
-        for i in range(len(self._sequence)):
-            event = self._sequence[i]
+        flat_sequence = list(self._sequence)
+        for i in range(len(flat_sequence)):
+            event = flat_sequence[i]
             if isinstance(event, Tone) \
                     and event._tie \
-                    and i < len(self._sequence) - 1 \
-                    and isinstance(self._sequence[i+1], Tone) \
-                    and to_MIDI_pitch(self._sequence[i+1]._pitch) == to_MIDI_pitch(event._pitch):
+                    and i < len(flat_sequence) - 1 \
+                    and isinstance(flat_sequence[i+1], Tone) \
+                    and to_MIDI_pitch(flat_sequence[i+1]._pitch) == to_MIDI_pitch(event._pitch):
                 tie_extent += event.extent()
                 print("tie +=", tie_extent)
                 continue
@@ -309,42 +342,66 @@ class Sequence(Event):
                 event._duration = tie_extent + Event.time_interval(event._duration)
                 event._extent = tie_extent + Event.time_interval(event._extent)
                 tie_extent = 0
-            event.write(file=file)
-            if (isinstance(event, Tone) or isinstance(event, Beat) or isinstance(event, Rest)) and event.extent() > 0:
+            with transposed(event, self._transpose):
+                event.write(file=file)
+            if event.is_atomic() and event.extent() > 0:
                 Event.write_indent(file)
-                print("sleep {}".format(event.extent()), file=file)
+                Event.wait(time=event.extent(), file=file)
 
 
 class Measure(Sequence):
     def __init__(self, events, extent, unit='b', symbol=None):
-        if not isinstance(events, str) and not isinstance(events, Event):
+        if isinstance(events, str) or isinstance(events, Event):
+            e = Event.parse_event(events)
+            if e.is_atomic():
+                e._extent = str(extent)+unit
+            else:
+                raise UserWarning("Don't know how to handle non-atomic event {} in measure".format(e))
+            if isinstance(e, Tone):
+                e._duration = str(extent)+unit
+            sequence = [e]
+        else:
             sequence = []
             part_extent = extent / len(events)
             for e in events:
                 sequence.append(Measure(e, part_extent, unit=unit))
-        else:
-            e = Event.parse_event(events)
-            if isinstance(e, Tone):
-                e._duration = extent
-                e._extent = extent
-            elif isinstance(e, Rest):
-                e._extent = extent
-            else:
-                raise UserWarning("Don't know how to handle event:", e)
-            sequence = [e]
         super(Measure, self).__init__(sequence, symbol=None)
 
 
 class Parallel(Event):
-    def __init__(self, events, symbol=None):
-        self.events = events
+
+    @staticmethod
+    def flatten(event, onset=0):
+        if event.is_atomic():
+            yield (event, onset, onset + event.extent())
+        elif isinstance(event, Symbol):
+            raise UserWarning("Cannot parallelize Symbol event {}".format(event))
+        elif isinstance(event, Loop):
+            raise UserWarning("Cannot parallelize Loop event {}".format(event))
+        elif isinstance(event, Parallel):
+            for e in event._block:
+                yield from Parallel.flatten(event=e, onset=onset)
+        elif isinstance(event, Sequence):
+            new_onset = onset
+            for e in event.get_sequence():
+                if e.extent() is not None:
+                    yield from Parallel.flatten(event=e, onset=new_onset)
+                    new_onset += e.extent()
+                else:
+                    raise UserWarning("Cannot parallelize event {} with undefined extent {}".format(e, e.extent()))
+        else:
+            raise UserWarning("Don't know how to handle event {} in parallelization".format(event))
+
+    def __init__(self, block, symbol=None, transpose=0):
+        super(Parallel, self).__init__(transpose=transpose)
+        self._block = block
         if symbol is not None:
             self.create_symbol(symbol)
 
     def __str__(self):
         s = "==["
         first = True
-        for e in self.events:
+        for e in self._block:
             if first:
                 first = False
             else:
@@ -355,26 +412,51 @@ class Parallel(Event):
 
     def extent(self):
         extent = 0
-        for event in self.events:
+        for event in self._block:
             extent = max(extent, event.extent())
         return extent
 
     def write(self, file):
-        print("# parallel event not implemented yet", file=file)
-        # for event in self.events:
-        #     event.write(file=file)
-        #     if event.extent() > 0 and (isinstance(event, Tone) or isinstance(event, Beat) or isinstance(event, Rest)):
-        #         Event.write_indent(file)
-        #         print("sleep {}".format(event.extent()), file=file)
+        time = 0
+        max_offset = 0
+        for event, onset, offset in sorted(list(Parallel.flatten(self)), key=lambda x: x[1]):
+            max_offset = max(max_offset, offset)
+            if onset > time:
+                Event.wait(time=onset - time, file=file)
+                time = onset
+            with transposed(event, self._transpose):
+                event.write(file=file)
+        if max_offset > time:
+            Event.wait(time=max_offset - time, file=file)
+
+
+class Transposed(Event):
+
+    def __init__(self, event, transpose):
+        super(Transposed, self).__init__(transpose=transpose)
+        if not event.is_transposable():
+            raise UserWarning("Cannot transpose event {}".format(event))
+        self._event = event
+
+    def __str__(self):
+        return "T("+str(self._event)+", {})".format(self._transpose)
+
+    def extent(self):
+        return self._event.extent()
+
+    def write(self, file):
+        with transposed(self._event, self._transpose):
+            self._event.write(file)
 
 
 class Symbol(Event):
 
     def __init__(self, symbol):
+        super(Symbol, self).__init__(transpose=0)
         self._symbol = symbol
 
     def extent(self):
-        raise UserWarning("Extent of symbol-event requested")
+        return Event.symbols[self._symbol][2]
 
     def write(self, file):
         Event.write_indent(file)
@@ -383,16 +465,24 @@ class Symbol(Event):
 
 class Loop(Event):
 
-    def __init__(self, event, symbol=None, repeat=None, active=True):
+    def __init__(self, event, symbol=None, repeat=None, active=True, transpose=0):
+        super(Loop, self).__init__(transpose=transpose)
         self._symbol = symbol if symbol is not None else Event.random_string()
         self._repeat = repeat
-        event.create_symbol(self._symbol)
+        with transposed(event, self._transpose):
+            event.create_symbol(self._symbol)
         self._symbol_event = Symbol(self._symbol)
         if active:
             Event.add_loop(self._symbol)
 
+    def __str__(self):
+        return "Loop("+self._symbol+")"
+
     def extent(self):
-        raise UserWarning("Extent of loop-event requested")
+        if self._repeat is None:
+            return None
+        else:
+            return self._repeat * self._symbol_event.extent()
 
     def write(self, file):
         Event.write_indent(file)
@@ -427,22 +517,34 @@ if __name__ == "__main__":
         ## alle meine entchen
         # Event.parse_event("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1").write(file)
         ## basic beat
-        s1 = Sequence([
-            Beat(extent="1/4", amplitude=0.5),
-            Tone("e", "1/4", amplitude=0.7),
-            Beat(extent="1/4", amplitude=1.),
-            Rest("1/4")
-        ])
-        s2 = Sequence([
-            Beat(extent="1/4", amplitude=0.5),
-            Tone("f#", "1/4", amplitude=0.7),
-            Beat(extent="1/4", amplitude=1.),
-            Rest("1/4")
-        ])
-        # s.write(file)
-        l1 = Loop(s1, "a", repeat=3)
-        l2 = Loop(s2, "b", repeat=3)
-        Loop(Sequence([l1, l2]), "z").write(file)
+        t = Tone("e", "1/4", amplitude=0.7)
+        s = Sequence(
+            [Beat(extent="1/4", amplitude=0.5),
+             Parallel([t, Transposed(t, 4)]),
+             Beat(extent="1/4", amplitude=1.),
+             Rest("1/4")]
+        )
+        Loop(Sequence([
+            Parallel([
+                # Measure(["c''", "r", "c''", "r", "c''", "r", "c''", "r", "c''", "r"], 4, 'b'),
+                Measure(['c', 'r', 'c', 'r', 'c', 'r', 'c', 'r'], 4, 'b'),
+                Measure(['b', 'r', 'b', 'r', 'b', 'r'], 4, 'b'),
+            ]),
+            # Event.parse_event("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1"),
+            # Loop(Sequence(
+            #     [Beat(extent="1/4", amplitude=0.5),
+            #      Parallel([Tone("e", "1/4", amplitude=0.7), Tone("g#", "1/4", amplitude=0.7)]),
+            #      Beat(extent="1/4", amplitude=1.),
+            #      Rest("1/4")]
+            # ), repeat=2),
+            # Loop(s, repeat=2),
+            Loop(Sequence(
+                [Beat(extent="1/4", amplitude=0.5),
+                 Parallel([Tone("f#", "1/4", amplitude=0.7), Tone("a", "1/4", amplitude=0.7)]),
+                 Beat(extent="1/4", amplitude=1.),
+                 Rest("1/4")]
+            ), repeat=2)
+        ]), "X").write(file)
         ##
         Event.indent -= 1
         print("end", file=file)
