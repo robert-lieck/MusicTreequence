@@ -179,13 +179,17 @@ class Event(object):
                 if vals[0] == 'r' or vals[0] == 'R':
                     return Rest(length)
                 else:
-                    if vals[0].endswith("_"):
-                        pitch = vals[0][:-1]
-                        tie = True
-                    else:
-                        pitch = vals[0]
-                        tie = False
-                    return Tone(pitch=pitch, duration=length, tie=tie)
+                    pitch = vals[0]
+                    tie = False
+                    staccato = False
+                    while pitch.endswith("_") or pitch.endswith("."):
+                        if pitch.endswith("_"):
+                            pitch = pitch[:-1]
+                            tie = True
+                        if pitch.endswith("."):
+                            pitch = pitch[:-1]
+                            staccato = True
+                    return Tone(pitch=pitch, duration=length, tie=tie, staccato=staccato)
         else:
             # just pass through
             return event
@@ -224,28 +228,35 @@ class Event(object):
 
 class Tone(Event):
 
-    def __init__(self, pitch, duration='1/4', extent=None, amplitude=1., symbol=None, tie=False, transpose=0):
+    def __init__(self, pitch, duration='1/4', extent=None, amplitude=1., symbol=None, tie=False, staccato=False, transpose=0):
         super(Tone, self).__init__(transpose=transpose)
         self._pitch = pitch
         self._duration = duration
         self._extent = duration if extent is None else extent
         self._amplitude = amplitude
         self._tie = tie
+        self._staccato = staccato
         if symbol is not None:
             self.create_symbol(symbol)
 
     def __str__(self):
-        return "{}:{}({}):{}{}".format(self._pitch, self._duration, self._extent, self._amplitude, ("" if not self._tie else "_"))
+        return "{}:{}({}):{}{}{}".format(self._pitch,
+                                         self._duration,
+                                         self._extent,
+                                         self._amplitude,
+                                         ("_" if self._tie else ""),
+                                         ("." if self._staccato else ""))
 
     def extent(self):
         return Event.time_interval(self._extent)
 
     def write(self, file):
+        pitch = to_MIDI_pitch(self._pitch) + self._transpose
+        duration = Event.time_interval(self._duration)
+        if self._staccato:
+            duration = 0.01
         Event.write_indent(file)
-        print("tone pitch: {}, duration: {}, amp: {}".format(to_MIDI_pitch(self._pitch) + self._transpose,
-                                                             Event.time_interval(self._duration),
-                                                             self._amplitude),
-              file=file)
+        print("tone pitch: {}, duration: {}, amp: {}".format(pitch, duration, self._amplitude), file=file)
 
 
 class Beat(Event):
@@ -287,6 +298,14 @@ class Rest(Event):
 
 class Sequence(Event):
 
+    # WARNING!!! There is a bug, this only works once. Consider this code:
+    # x = ["a", "b", "c"]
+    # for x in Sequence.flatten(x):
+    #     print(x)
+    # for x in Sequence.flatten(x):
+    #     print(x)
+    # for x in Sequence.flatten(x):
+    #     print(x)
     @staticmethod
     def flatten(sequence):
         for event in sequence:
@@ -299,7 +318,8 @@ class Sequence(Event):
 
     def __init__(self, sequence, symbol=None, transpose=0):
         super(Sequence, self).__init__(transpose=transpose)
-        self._sequence = Sequence.flatten(sequence)
+        # self._sequence = Sequence.flatten(sequence) # this triggers the bug from above on multiple iterations through sequence
+        self._sequence = list(Sequence.flatten(sequence))
         if symbol is not None:
             self.create_symbol(symbol)
 
@@ -335,10 +355,8 @@ class Sequence(Event):
                     and isinstance(flat_sequence[i+1], Tone) \
                     and to_MIDI_pitch(flat_sequence[i+1]._pitch) == to_MIDI_pitch(event._pitch):
                 tie_extent += event.extent()
-                print("tie +=", tie_extent)
                 continue
             if tie_extent > 0:
-                print("tie:", tie_extent, " --> execute")
                 event._duration = tie_extent + Event.time_interval(event._duration)
                 event._extent = tie_extent + Event.time_interval(event._extent)
                 tie_extent = 0
@@ -514,8 +532,6 @@ if __name__ == "__main__":
         m = Measure(['c', 'd', 'e', 'f', ['g', 'f'], ['e', 'd', 'c', 'B'], 'c'], 4)
         # m.write(file)
         # Event.parse_event('r r/1').write(file)
-        ## alle meine entchen
-        # Event.parse_event("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1").write(file)
         ## basic beat
         t = Tone("e", "1/4", amplitude=0.7)
         s = Sequence(
@@ -524,13 +540,18 @@ if __name__ == "__main__":
              Beat(extent="1/4", amplitude=1.),
              Rest("1/4")]
         )
+        e = Event.parse_event("c r c. c. c. r c_ c_ c r")
+        print(e)
+        # print(Sequence([e, f]))
         Loop(Sequence([
+            ## alle meine entchen
+            # Event.parse_event("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1"),
+            ## quintuplets
             Parallel([
                 # Measure(["c''", "r", "c''", "r", "c''", "r", "c''", "r", "c''", "r"], 4, 'b'),
-                Measure(['c', 'r', 'c', 'r', 'c', 'r', 'c', 'r'], 4, 'b'),
-                Measure(['b', 'r', 'b', 'r', 'b', 'r'], 4, 'b'),
+                # Measure(['c', 'r', 'c', 'r', 'c', 'r', 'c', 'r'], 4, 'b'),
+                # Measure(['b', 'r', 'b', 'r', 'b', 'r'], 4, 'b'),
             ]),
-            # Event.parse_event("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1"),
             # Loop(Sequence(
             #     [Beat(extent="1/4", amplitude=0.5),
             #      Parallel([Tone("e", "1/4", amplitude=0.7), Tone("g#", "1/4", amplitude=0.7)]),
