@@ -3,6 +3,9 @@ import random
 import string
 import collections
 from contextlib import contextmanager
+import numpy as np
+from copy import deepcopy
+
 
 def to_MIDI_pitch(pitch):
     """map to midi pitch"""
@@ -73,20 +76,58 @@ def to_MIDI_pitch(pitch):
 @contextmanager
 def transposed(event, transpose):
     event._transpose += transpose
-    yield None
+    yield
     event._transpose -= transpose
+
+
+def metrical_grid(nested_idx):
+    """
+    Returns the depth inside the metrical grid
+    :param nested_idx: nested index on grid levels
+    :return: depth
+
+    For a 4/4 measure:
+    |
+    |       |
+    |   |   |   |
+    | | | | | | | |
+    0 3 2 3 1 3 2 3 (depth)
+    -----------------------
+    0 0 0 0 0 0 0 0 (nested
+    0 0 0 0 1 1 1 1  ...
+    0 0 1 1 0 0 1 1  ...
+    0 1 0 1 0 1 0 1  index)
+
+    For a 12/8 measure:
+    |
+    |           |
+    |     |     |     |
+    | | | | | | | | | | | |
+    0 3 3 2 3 3 1 3 3 2 3 3 (depth)
+    -------------------------------
+    0 0 0 0 0 0 0 0 0 0 0 0 (nested
+    0 0 0 0 0 0 1 1 1 1 1 1  ...
+    0 0 0 1 1 1 0 0 0 1 1 1  ...
+    0 1 2 0 1 2 0 1 2 0 1 2  index)
+    """
+    idx = 0
+    for idx, n_idx in reversed(list(enumerate(nested_idx))):
+        if n_idx > 0:
+            break
+    return idx
 
 
 class Event(object):
 
-    indent = 0
-    beat = 1
-    symbols = {}
-    loops = set()
+    _indent = 0
+    _beat = 1
+    _symbols = {}
+    _loops = set()
+    _str_verbose = True
 
     @staticmethod
     def write_indent(file):
-        for _ in range(Event.indent):
+        for _ in range(Event._indent):
             print("  ", end="", file=file)
 
     @staticmethod
@@ -100,11 +141,11 @@ class Event(object):
                 return float(extent[:-2])/1000
             elif extent.endswith("b"):
                 # beats --> sec
-                return float(extent[:-1]) * Event.beat
+                return float(extent[:-1]) * Event._beat
             elif '/' in extent:
                 # x/y --> sec [1/4 = 1 beat]
                 parts = extent.split('/')
-                return 4 * float(parts[0]) / float(parts[1]) * Event.beat
+                return 4 * float(parts[0]) / float(parts[1]) * Event._beat
             else:
                 # --> sec
                 return float(extent)
@@ -116,11 +157,11 @@ class Event(object):
     def set_beat(beat):
         if isinstance(beat, str):
             if beat.endswith('bpm'):
-                Event.beat = float(60 / float(beat[:-3]))
+                Event._beat = float(60 / float(beat[:-3]))
             else:
-                Event.beat = float(beat)
+                Event._beat = float(beat)
         else:
-            Event.beat = beat
+            Event._beat = beat
 
     @staticmethod
     def random_string(length=10, lower=True, upper=False, digits=False):
@@ -137,7 +178,7 @@ class Event(object):
     def write_symbols(file):
         print("# symbols", file=file)
         print("", file=file)
-        for function_name, function, extent in Event.symbols.values():
+        for function_name, function, extent in Event._symbols.values():
             print(function, file=file)
             print("", file=file)
 
@@ -146,7 +187,7 @@ class Event(object):
         print("# function for testing infinite loops", file=file)
         print("def loop_test(key)", file=file)
         print("  loops = [", file=file)
-        for name in Event.loops:
+        for name in Event._loops:
             print("    '{}',".format(name), file=file)
         print("  ].to_set", file=file)
         print("  return loops.include?(key)", file=file)
@@ -154,13 +195,13 @@ class Event(object):
 
     @staticmethod
     def add_loop(name):
-        if name in Event.loops:
+        if name in Event._loops:
             raise UserWarning("Loop '{}' already exists".format(name))
         else:
-            Event.loops.add(name)
+            Event._loops.add(name)
 
     @staticmethod
-    def parse_event(event):
+    def parse_events(event, agglomeration_type="Sequence"):
         if isinstance(event, str):
             # string should be single event or sequence of events separated by whitespace
             list = event.split()
@@ -168,8 +209,13 @@ class Event(object):
                 # sequence
                 sequence = []
                 for e in list:
-                    sequence.append(Event.parse_event(e))
-                return Sequence(sequence)
+                    sequence.append(Event.parse_events(e))
+                if agglomeration_type == "Sequence":
+                    return Sequence(sequence)
+                elif agglomeration_type == "Parallel":
+                    return Parallel(sequence)
+                else:
+                    raise UserWarning("Unknown agglomeration type {}".format(agglomeration_type))
             else:
                 # single event
                 vals = event.split('/')
@@ -199,25 +245,30 @@ class Event(object):
         Event.write_indent(file=file)
         print("sleep {}".format(time), file=file)
 
-    def create_symbol(self, symbol, random_name=False):
-        function_name = Event.random_string() if random_name else "function_"+symbol
-        with io.StringIO() as file:
-            old_indent = Event.indent
-            print("def {} # {}".format(function_name, symbol), file=file)
-            Event.indent = 1
-            self.write(file)
-            print("end", end='', file=file)
-            Event.indent = old_indent
-            Event.symbols[symbol] = (function_name, file.getvalue(), self.extent())
-
     def __init__(self, transpose=0):
         self._transpose = transpose
 
+    def create_symbol(self, symbol, random_name=False):
+        function_name = Event.random_string() if random_name else "function_"+symbol
+        with io.StringIO() as file:
+            old_indent = Event._indent
+            print("def {} # {}".format(function_name, symbol), file=file)
+            Event._indent = 1
+            self.write(file)
+            print("end", end='', file=file)
+            Event._indent = old_indent
+            Event._symbols[symbol] = (function_name, file.getvalue(), self.extent())
+
+    def transpose(self, trp):
+        if self.is_transposable():
+            self._transpose = trp
+        return self
+
     def is_atomic(self):
-        return isinstance(self, (Tone, Beat, Rest)) or (isinstance(self, Transposed) and self._event.is_atomic())
+        return False
 
     def is_transposable(self):
-        return isinstance(self, (Tone, Sequence, Parallel, Transposed))
+        return False
 
     def extent(self):
         return 0
@@ -226,11 +277,22 @@ class Event(object):
         pass
 
 
-class Tone(Event):
+class Chord(Event):
 
-    def __init__(self, pitch, duration='1/4', extent=None, amplitude=1., symbol=None, tie=False, staccato=False, transpose=0):
-        super(Tone, self).__init__(transpose=transpose)
-        self._pitch = pitch
+    def __init__(self,
+                 intervals,
+                 base,
+                 duration='1/4',
+                 extent=None,
+                 amplitude=1.,
+                 symbol=None,
+                 tie=False,
+                 staccato=False,
+                 transpose=0):
+        super(Chord, self).__init__(transpose=transpose)
+        self._intervals = list(sorted(intervals))
+        self._octaves = 1 + (max(self._intervals) - min(self._intervals)) // 12
+        self._base = base
         self._duration = duration
         self._extent = duration if extent is None else extent
         self._amplitude = amplitude
@@ -240,23 +302,73 @@ class Tone(Event):
             self.create_symbol(symbol)
 
     def __str__(self):
-        return "{}:{}({}):{}{}{}".format(self._pitch,
-                                         self._duration,
-                                         self._extent,
-                                         self._amplitude,
-                                         ("_" if self._tie else ""),
-                                         ("." if self._staccato else ""))
+        if Event._str_verbose:
+            return "Chord({}[{}]/{}+{}{}{} {}|{} {})".format(tuple(self._intervals),
+                                                             self._octaves,
+                                                             self._base,
+                                                             self._transpose,
+                                                             ("_" if self._tie else ""),
+                                                             ("." if self._staccato else ""),
+                                                             self._duration,
+                                                             self._extent,
+                                                             self._amplitude)
+        else:
+            return "{}/{}+{}:{}".format(tuple(self._intervals),
+                                        self._base,
+                                        self._transpose,
+                                        self._duration)
+
+    def rotate(self, n):
+        self._intervals = self._intervals[n:] + [i + 12 * self._octaves for i in self._intervals[:n]]
+        return self
+
+    def is_atomic(self):
+        return True
+
+    def is_transposable(self):
+        return True
 
     def extent(self):
         return Event.time_interval(self._extent)
 
     def write(self, file):
-        pitch = to_MIDI_pitch(self._pitch) + self._transpose
+        base_pitch = to_MIDI_pitch(self._base) + self._transpose
         duration = Event.time_interval(self._duration)
         if self._staccato:
             duration = 0.01
-        Event.write_indent(file)
-        print("tone pitch: {}, duration: {}, amp: {}".format(pitch, duration, self._amplitude), file=file)
+        for interval in self._intervals:
+            pitch = base_pitch + interval
+            Event.write_indent(file)
+            print("tone pitch: {}, duration: {}, amp: {}".format(pitch, duration, self._amplitude), file=file)
+
+
+class Tone(Chord):
+
+    def __init__(self, pitch,
+                 duration='1/4',
+                 extent=None,
+                 amplitude=1.,
+                 symbol=None,
+                 tie=False,
+                 staccato=False,
+                 transpose=0):
+        super(Tone, self).__init__(base=pitch,
+                                   intervals=[0],
+                                   duration=duration,
+                                   extent=extent,
+                                   amplitude=amplitude,
+                                   symbol=symbol,
+                                   tie=tie,
+                                   staccato=staccato,
+                                   transpose=transpose)
+
+    def __str__(self):
+        if Event._str_verbose:
+            return Chord.__str__(self)
+        else:
+            return "{}+{}:{}".format(self._base,
+                                     self._transpose,
+                                     self._duration)
 
 
 class Beat(Event):
@@ -270,6 +382,9 @@ class Beat(Event):
 
     def __str__(self):
         return "beat:{}:{}".format(self._extent, self._amplitude)
+
+    def is_atomic(self):
+        return True
 
     def extent(self):
         return Event.time_interval(self._extent)
@@ -288,6 +403,9 @@ class Rest(Event):
 
     def __str__(self):
         return "r:{}".format(self._extent)
+
+    def is_atomic(self):
+        return True
 
     def extent(self):
         return Event.time_interval(self._extent)
@@ -316,10 +434,13 @@ class Sequence(Event):
             else:
                 yield event
 
-    def __init__(self, sequence, symbol=None, transpose=0):
+    def __init__(self, sequence, symbol=None, transpose=0, make_deepcopy=True):
         super(Sequence, self).__init__(transpose=transpose)
         # self._sequence = Sequence.flatten(sequence) # this triggers the bug from above on multiple iterations through sequence
         self._sequence = list(Sequence.flatten(sequence))
+        if make_deepcopy:
+            for i in range(len(self._sequence)):
+                self._sequence[i] = deepcopy(self._sequence[i])
         if symbol is not None:
             self.create_symbol(symbol)
 
@@ -334,6 +455,9 @@ class Sequence(Event):
             s += str(e)
         s += "]"
         return s
+
+    def is_transposable(self):
+        return True
 
     def get_sequence(self):
         return self._sequence
@@ -368,22 +492,34 @@ class Sequence(Event):
 
 
 class Measure(Sequence):
-    def __init__(self, events, extent, unit='b', symbol=None):
+    def __init__(self,
+                 events,
+                 extent,
+                 unit='b',
+                 symbol=None,
+                 make_deepcopy=True,
+                 nested_idx=(1,),
+                 amplitude=lambda nested_idx: 0.05 + 0.95 * np.exp(-metrical_grid(nested_idx) / 2)):
+                 # amplitude=lambda nested_idx: 0.1 + 0.9 / (metrical_grid(nested_idx) + 1)):
+                 # amplitude = lambda nested_idx: 1):
         if isinstance(events, str) or isinstance(events, Event):
-            e = Event.parse_event(events)
+            e = Event.parse_events(events)
             if e.is_atomic():
                 e._extent = str(extent)+unit
             else:
                 raise UserWarning("Don't know how to handle non-atomic event {} in measure".format(e))
-            if isinstance(e, Tone):
+            print(type(e), isinstance(e, (Chord, Beat)))
+            if isinstance(e, Chord):
                 e._duration = str(extent)+unit
+            if isinstance(e, (Chord, Beat)):
+                e._amplitude = amplitude(nested_idx=nested_idx)
             sequence = [e]
         else:
             sequence = []
             part_extent = extent / len(events)
-            for e in events:
-                sequence.append(Measure(e, part_extent, unit=unit))
-        super(Measure, self).__init__(sequence, symbol=None)
+            for idx, e in enumerate(events):
+                sequence.append(Measure(e, part_extent, unit=unit, nested_idx=list(nested_idx) + [idx]))
+        super(Measure, self).__init__(sequence, symbol=None, make_deepcopy=make_deepcopy)
 
 
 class Parallel(Event):
@@ -410,9 +546,12 @@ class Parallel(Event):
         else:
             raise UserWarning("Don't know how to handle event {} in parallelization".format(event))
 
-    def __init__(self, block, symbol=None, transpose=0):
+    def __init__(self, block, symbol=None, transpose=0, make_deepcopy=True):
         super(Parallel, self).__init__(transpose=transpose)
         self._block = block
+        if make_deepcopy:
+            for i in range(len(self._block)):
+                self._block[i] = deepcopy(self._block[i])
         if symbol is not None:
             self.create_symbol(symbol)
 
@@ -427,6 +566,9 @@ class Parallel(Event):
             s += str(e)
         s += "]"
         return s
+
+    def is_transposable(self):
+        return True
 
     def extent(self):
         extent = 0
@@ -450,14 +592,23 @@ class Parallel(Event):
 
 class Transposed(Event):
 
-    def __init__(self, event, transpose):
+    def __init__(self, event, transpose, make_deepcopy=False):
         super(Transposed, self).__init__(transpose=transpose)
         if not event.is_transposable():
             raise UserWarning("Cannot transpose event {}".format(event))
-        self._event = event
+        if make_deepcopy:
+            self._event = deepcopy(event)
+        else:
+            self._event = event
 
     def __str__(self):
         return "T("+str(self._event)+", {})".format(self._transpose)
+
+    def is_atomic(self):
+        return self._event.is_atomic()
+
+    def is_transposable(self):
+        return True
 
     def extent(self):
         return self._event.extent()
@@ -474,11 +625,11 @@ class Symbol(Event):
         self._symbol = symbol
 
     def extent(self):
-        return Event.symbols[self._symbol][2]
+        return Event._symbols[self._symbol][2]
 
     def write(self, file):
         Event.write_indent(file)
-        print("{} # {}".format(Event.symbols[self._symbol][0], self._symbol), file=file)
+        print("{} # {}".format(Event._symbols[self._symbol][0], self._symbol), file=file)
 
 
 class Loop(Event):
@@ -508,14 +659,14 @@ class Loop(Event):
             print("while loop_test('{}')".format(self._symbol), file=file)
         else:
             print("{}.times do".format(self._repeat), file=file)
-        Event.indent += 1
+        Event._indent += 1
         Event.write_indent(file)
         print('''puts "restart {}loop '{}'"'''.format(
             ('' if self._repeat is None else "{}-time-".format(self._repeat)),
             self._symbol),
             file=file)
         self._symbol_event.write(file)
-        Event.indent -= 1
+        Event._indent -= 1
         Event.write_indent(file)
         print("end", file=file)
 
@@ -523,13 +674,31 @@ class Loop(Event):
 if __name__ == "__main__":
     with io.StringIO() as file:
         # create events and write to string-file
-        Event.set_beat("120bpm")
+        Event.set_beat("180bpm")
         print("# main function", file=file)
         print("def song", file=file)
-        Event.indent += 1
-        ## takt
+        Event._indent += 1
+        ## measures
         m = Measure(['d', 'd', 'f', ['g_', 'g_', "d'"], 'a', 'g', 'f', 'e'], 4, 'sec') # swing
         m = Measure(['c', 'd', 'e', 'f', ['g', 'f'], ['e', 'd', 'c', 'B'], 'c'], 4)
+        m = Measure([[["c'.", "d'."], ["e'.", "f'."]],
+                     ["g'/2.", "g'/2."],
+                     ["a'.", "a'.", "a'.", "a'."],
+                     ["g'/1."],
+                     ["a'.", "a'.", "a'.", "a'."],
+                     ["g'/1."],
+                     ["f'.", "f'.", "f'.", "f'."],
+                     ["e'/2.", "e'/2."],
+                     ["g'.", "g'.", "g'.", "g'."],
+                     ["c'/1."]], extent=20)
+        beat = Beat(extent="1/16")
+        m = Measure([
+            [[[beat, beat, beat], [beat, beat]],
+             [[beat,       beat], [beat, beat]]],
+            [[[beat,       beat], [beat, beat]],
+             [[beat,       beat], [beat, beat]]],
+            # [beat, beat, beat, beat],
+        ], extent=8)
         # m.write(file)
         # Event.parse_event('r r/1').write(file)
         ## basic beat
@@ -540,34 +709,40 @@ if __name__ == "__main__":
              Beat(extent="1/4", amplitude=1.),
              Rest("1/4")]
         )
-        e = Event.parse_event("c r c. c. c. r c_ c_ c r")
-        print(e)
+        e = Event.parse_events("c r c. c. c. r c_ c_ c r")
+        # print(e)
         # print(Sequence([e, f]))
+        ## chords
+        print(Chord(intervals=[0, 4, 7], base="e", duration="1/4", amplitude=0.7).rotate(1))
+        ##
         Loop(Sequence([
             ## alle meine entchen
-            # Event.parse_event("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1"),
+            # Event.parse_events("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1"),
+            m,
             ## quintuplets
             Parallel([
                 # Measure(["c''", "r", "c''", "r", "c''", "r", "c''", "r", "c''", "r"], 4, 'b'),
                 # Measure(['c', 'r', 'c', 'r', 'c', 'r', 'c', 'r'], 4, 'b'),
                 # Measure(['b', 'r', 'b', 'r', 'b', 'r'], 4, 'b'),
             ]),
-            # Loop(Sequence(
-            #     [Beat(extent="1/4", amplitude=0.5),
-            #      Parallel([Tone("e", "1/4", amplitude=0.7), Tone("g#", "1/4", amplitude=0.7)]),
-            #      Beat(extent="1/4", amplitude=1.),
-            #      Rest("1/4")]
-            # ), repeat=2),
+            Loop(Sequence(
+                [Beat(extent="1/4", amplitude=0.5),
+                 Chord(intervals=[0, 4], base="e", duration="1/4", amplitude=0.5),
+                 # Parallel([Tone("e", "1/4", amplitude=0.7), Tone("g#", "1/4", amplitude=0.7)]),
+                 # Event.parse_events("e/4 g#/4", agglomeration_type="Parallel"),
+                 Beat(extent="1/4", amplitude=1.),
+                 Rest("1/4")]
+            ), repeat=2),
             # Loop(s, repeat=2),
             Loop(Sequence(
                 [Beat(extent="1/4", amplitude=0.5),
-                 Parallel([Tone("f#", "1/4", amplitude=0.7), Tone("a", "1/4", amplitude=0.7)]),
+                 Parallel([Tone("f#", "1/4", amplitude=0.5), Tone("a", "1/4", amplitude=0.5)]),
                  Beat(extent="1/4", amplitude=1.),
                  Rest("1/4")]
             ), repeat=2)
         ]), "X").write(file)
         ##
-        Event.indent -= 1
+        Event._indent -= 1
         print("end", file=file)
         print("", file=file)
         Event.write_loops(file)
