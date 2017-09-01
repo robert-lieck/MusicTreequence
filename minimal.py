@@ -61,8 +61,8 @@ def to_MIDI_pitch(pitch):
         "fb''''''": 124, "e6": 124, "fb6": 124, "f''''''": 125, "e#''''''": 125, "f6": 125, "e#6": 125,
         "f#''''''": 126, "gb''''''": 126, "f#6": 126, "gb6": 126, "g''''''": 127, "g6": 127
     }
-    if isinstance(pitch, int):
-        return pitch
+    if isinstance(pitch, (int, np.int_)):
+        return int(pitch)
     elif isinstance(pitch, str):
         try:
             pitch = int(pitch)
@@ -70,14 +70,15 @@ def to_MIDI_pitch(pitch):
             return MIDI_pitch[pitch]
         return pitch
     else:
-        raise UserWarning("Cannot interpret '{}' as pitch".format(pitch))
+        raise UserWarning("Cannot interpret '{}' (type {}) as pitch".format(pitch, type(pitch)))
 
 
 @contextmanager
-def transposed(event, transpose):
-    event._transpose += transpose
+def transposed(event, transpose_event):
+    event._transpose_list += [(transpose_event._transpose, transpose_event._tonic, transpose_event._scale)]
+    event._transpose_list += transpose_event._transpose_list
     yield
-    event._transpose -= transpose
+    event._transpose_list = event._transpose_list[:-1-len(transpose_event._transpose_list)]
 
 
 def metrical_grid(nested_idx):
@@ -115,6 +116,27 @@ def metrical_grid(nested_idx):
         if n_idx > 0:
             break
     return idx
+
+
+class Scale(object):
+
+    def __init__(self, intervals=range(12), pitches=None):
+        if pitches is not None:
+            intervals = [(to_MIDI_pitch(p) - to_MIDI_pitch(pitches[0])) % 12 for p in pitches]
+        self._intervals = np.array(sorted(np.unique(intervals)))
+        if self._intervals[0] < 0:
+            raise UserWarning("Scale cannot contain negative intervals.")
+        if self._intervals[-1] > 11:
+            raise UserWarning("Scale cannot contain intervals of an octave or above.")
+
+    def __str__(self):
+        return str(self._intervals)
+
+    def get_interval(self, scale_degree):
+        return self._intervals[scale_degree % len(self._intervals)] + 12 * (scale_degree // len(self._intervals))
+
+    def get_scale_degree(self, pitch, tonic):
+        return np.argmin((self._intervals + to_MIDI_pitch(tonic) - to_MIDI_pitch(pitch)) % 12)
 
 
 class Event(object):
@@ -245,8 +267,11 @@ class Event(object):
         Event.write_indent(file=file)
         print("sleep {}".format(time), file=file)
 
-    def __init__(self, transpose=0):
+    def __init__(self, transpose=0, tonic=0, scale=Scale()):
         self._transpose = transpose
+        self._tonic = tonic
+        self._scale = scale
+        self._transpose_list = []
 
     def create_symbol(self, symbol, random_name=False):
         function_name = Event.random_string() if random_name else "function_"+symbol
@@ -288,8 +313,10 @@ class Chord(Event):
                  symbol=None,
                  tie=False,
                  staccato=False,
-                 transpose=0):
-        super(Chord, self).__init__(transpose=transpose)
+                 transpose=0,
+                 tonic=0,
+                 scale=Scale()):
+        super(Chord, self).__init__(transpose=transpose, tonic=tonic, scale=scale)
         self._intervals = list(sorted(intervals))
         self._octaves = 1 + (max(self._intervals) - min(self._intervals)) // 12
         self._base = base
@@ -332,12 +359,16 @@ class Chord(Event):
         return Event.time_interval(self._extent)
 
     def write(self, file):
-        base_pitch = to_MIDI_pitch(self._base) + self._transpose
+        transpose_list = [(self._transpose, self._tonic, self._scale)] + self._transpose_list
         duration = Event.time_interval(self._duration)
         if self._staccato:
             duration = 0.01
         for interval in self._intervals:
-            pitch = base_pitch + interval
+            pitch = to_MIDI_pitch(self._base) + interval
+            for transpose, tonic, scale in transpose_list:
+                scale_degree = scale.get_scale_degree(pitch=pitch, tonic=tonic)
+                pitch -= scale.get_interval(scale_degree=scale_degree)
+                pitch += scale.get_interval(scale_degree=scale_degree + transpose)
             Event.write_indent(file)
             print("tone pitch: {}, duration: {}, amp: {}".format(pitch, duration, self._amplitude), file=file)
 
@@ -351,7 +382,9 @@ class Tone(Chord):
                  symbol=None,
                  tie=False,
                  staccato=False,
-                 transpose=0):
+                 transpose=0,
+                 tonic=0,
+                 scale=Scale()):
         super(Tone, self).__init__(base=pitch,
                                    intervals=[0],
                                    duration=duration,
@@ -374,7 +407,7 @@ class Tone(Chord):
 class Beat(Event):
 
     def __init__(self, extent=0., amplitude=1., symbol=None):
-        super(Beat, self).__init__(transpose=0)
+        super(Beat, self).__init__(transpose=0, tonic=0, scale=Scale())
         self._extent = extent
         self._amplitude = amplitude
         if symbol is not None:
@@ -396,7 +429,7 @@ class Beat(Event):
 
 class Rest(Event):
     def __init__(self, extent, symbol=None):
-        super(Rest, self).__init__(transpose=0)
+        super(Rest, self).__init__(transpose=0, tonic=0, scale=Scale())
         self._extent = extent
         if symbol is not None:
             self.create_symbol(symbol)
@@ -434,8 +467,8 @@ class Sequence(Event):
             else:
                 yield event
 
-    def __init__(self, sequence, symbol=None, transpose=0, make_deepcopy=True):
-        super(Sequence, self).__init__(transpose=transpose)
+    def __init__(self, sequence, symbol=None, transpose=0, tonic=0, scale=Scale(), make_deepcopy=True):
+        super(Sequence, self).__init__(transpose=transpose, tonic=tonic, scale=scale)
         # self._sequence = Sequence.flatten(sequence) # this triggers the bug from above on multiple iterations through sequence
         self._sequence = list(Sequence.flatten(sequence))
         if make_deepcopy:
@@ -484,7 +517,7 @@ class Sequence(Event):
                 event._duration = tie_extent + Event.time_interval(event._duration)
                 event._extent = tie_extent + Event.time_interval(event._extent)
                 tie_extent = 0
-            with transposed(event, self._transpose):
+            with transposed(event, self):
                 event.write(file=file)
             if event.is_atomic() and event.extent() > 0:
                 Event.write_indent(file)
@@ -508,7 +541,6 @@ class Measure(Sequence):
                 e._extent = str(extent)+unit
             else:
                 raise UserWarning("Don't know how to handle non-atomic event {} in measure".format(e))
-            print(type(e), isinstance(e, (Chord, Beat)))
             if isinstance(e, Chord):
                 e._duration = str(extent)+unit
             if isinstance(e, (Chord, Beat)):
@@ -546,8 +578,8 @@ class Parallel(Event):
         else:
             raise UserWarning("Don't know how to handle event {} in parallelization".format(event))
 
-    def __init__(self, block, symbol=None, transpose=0, make_deepcopy=True):
-        super(Parallel, self).__init__(transpose=transpose)
+    def __init__(self, block, symbol=None, transpose=0, tonic=0, scale=Scale(), make_deepcopy=True):
+        super(Parallel, self).__init__(transpose=transpose, tonic=tonic, scale=scale)
         self._block = block
         if make_deepcopy:
             for i in range(len(self._block)):
@@ -584,7 +616,7 @@ class Parallel(Event):
             if onset > time:
                 Event.wait(time=onset - time, file=file)
                 time = onset
-            with transposed(event, self._transpose):
+            with transposed(event, self):
                 event.write(file=file)
         if max_offset > time:
             Event.wait(time=max_offset - time, file=file)
@@ -592,8 +624,8 @@ class Parallel(Event):
 
 class Transposed(Event):
 
-    def __init__(self, event, transpose, make_deepcopy=False):
-        super(Transposed, self).__init__(transpose=transpose)
+    def __init__(self, event, transpose, tonic=0, scale=Scale(), make_deepcopy=False):
+        super(Transposed, self).__init__(transpose=transpose, tonic=tonic, scale=scale)
         if not event.is_transposable():
             raise UserWarning("Cannot transpose event {}".format(event))
         if make_deepcopy:
@@ -614,14 +646,14 @@ class Transposed(Event):
         return self._event.extent()
 
     def write(self, file):
-        with transposed(self._event, self._transpose):
+        with transposed(self._event, self):
             self._event.write(file)
 
 
 class Symbol(Event):
 
     def __init__(self, symbol):
-        super(Symbol, self).__init__(transpose=0)
+        super(Symbol, self).__init__(transpose=0, tonic=0, scale=Scale())
         self._symbol = symbol
 
     def extent(self):
@@ -634,11 +666,11 @@ class Symbol(Event):
 
 class Loop(Event):
 
-    def __init__(self, event, symbol=None, repeat=None, active=True, transpose=0):
-        super(Loop, self).__init__(transpose=transpose)
+    def __init__(self, event, symbol=None, repeat=None, active=True, transpose=0, tonic=0, scale=Scale()):
+        super(Loop, self).__init__(transpose=transpose, tonic=tonic, scale=scale)
         self._symbol = symbol if symbol is not None else Event.random_string()
         self._repeat = repeat
-        with transposed(event, self._transpose):
+        with transposed(event, self):
             event.create_symbol(self._symbol)
         self._symbol_event = Symbol(self._symbol)
         if active:
@@ -674,7 +706,7 @@ class Loop(Event):
 if __name__ == "__main__":
     with io.StringIO() as file:
         # create events and write to string-file
-        Event.set_beat("180bpm")
+        Event.set_beat("380bpm")
         print("# main function", file=file)
         print("def song", file=file)
         Event._indent += 1
@@ -715,31 +747,35 @@ if __name__ == "__main__":
         ## chords
         print(Chord(intervals=[0, 4, 7], base="e", duration="1/4", amplitude=0.7).rotate(1))
         ##
+        ## alle meine entchen
+        alle_mein_entchen = Event.parse_events("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1")
+        scale = Scale(pitches=["c", "d", "e", "f", "g", "a", "b", "c"])
+        print(scale)
+        ##
         Loop(Sequence([
-            ## alle meine entchen
-            # Event.parse_events("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1"),
-            m,
+            Transposed(alle_mein_entchen, transpose=2, tonic='c', scale=scale),
+            # m,
             ## quintuplets
             Parallel([
                 # Measure(["c''", "r", "c''", "r", "c''", "r", "c''", "r", "c''", "r"], 4, 'b'),
                 # Measure(['c', 'r', 'c', 'r', 'c', 'r', 'c', 'r'], 4, 'b'),
                 # Measure(['b', 'r', 'b', 'r', 'b', 'r'], 4, 'b'),
             ]),
-            Loop(Sequence(
-                [Beat(extent="1/4", amplitude=0.5),
-                 Chord(intervals=[0, 4], base="e", duration="1/4", amplitude=0.5),
-                 # Parallel([Tone("e", "1/4", amplitude=0.7), Tone("g#", "1/4", amplitude=0.7)]),
-                 # Event.parse_events("e/4 g#/4", agglomeration_type="Parallel"),
-                 Beat(extent="1/4", amplitude=1.),
-                 Rest("1/4")]
-            ), repeat=2),
-            # Loop(s, repeat=2),
-            Loop(Sequence(
-                [Beat(extent="1/4", amplitude=0.5),
-                 Parallel([Tone("f#", "1/4", amplitude=0.5), Tone("a", "1/4", amplitude=0.5)]),
-                 Beat(extent="1/4", amplitude=1.),
-                 Rest("1/4")]
-            ), repeat=2)
+            # Loop(Sequence(
+            #     [Beat(extent="1/4", amplitude=0.5),
+            #      Chord(intervals=[0, 4], base="e", duration="1/4", amplitude=0.5),
+            #      # Parallel([Tone("e", "1/4", amplitude=0.7), Tone("g#", "1/4", amplitude=0.7)]),
+            #      # Event.parse_events("e/4 g#/4", agglomeration_type="Parallel"),
+            #      Beat(extent="1/4", amplitude=1.),
+            #      Rest("1/4")]
+            # ), repeat=2),
+            # # Loop(s, repeat=2),
+            # Loop(Sequence(
+            #     [Beat(extent="1/4", amplitude=0.5),
+            #      Parallel([Tone("f#", "1/4", amplitude=0.5), Tone("a", "1/4", amplitude=0.5)]),
+            #      Beat(extent="1/4", amplitude=1.),
+            #      Rest("1/4")]
+            # ), repeat=2)
         ]), "X").write(file)
         ##
         Event._indent -= 1
