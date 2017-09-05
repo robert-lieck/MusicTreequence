@@ -7,60 +7,62 @@ import numpy as np
 from copy import deepcopy
 
 
+MIDI_pitch = {
+    ",,,C": 0, ",,,,B#": 0, "C3": 0, "B#4": 0, ",,,C#": 1, ",,,Db": 1, "C#3": 1, "Db3": 1, ",,,D": 2, "D3": 2,
+    ",,,D#": 3, ",,,Eb": 3, "D#3": 3, "Eb3": 3, ",,,E": 4, ",,,Fb": 4, "E3": 4, "Fb3": 4, ",,,F": 5, ",,,E#": 5,
+    "F3": 5, "E#3": 5, ",,,F#": 6, ",,,Gb": 6, "F#3": 6, "Gb3": 6, ",,,G": 7, "G3": 7, ",,,G#": 8, ",,,Ab": 8,
+    "G#3": 8, "Ab3": 8, ",,,A": 9, "A3": 9, ",,,A#": 10, ",,,Bb": 10, "A#3": 10, "Bb3": 10, ",,,B": 11,
+    ",,Cb": 11, "B3": 11, "Cb2": 11, ",,C": 12, ",,,B#": 12, "C2": 12, "B#3": 12, ",,C#": 13, ",,Db": 13,
+    "C#2": 13, "Db2": 13, ",,D": 14, "D2": 14, ",,D#": 15, ",,Eb": 15, "D#2": 15, "Eb2": 15, ",,E": 16,
+    ",,Fb": 16, "E2": 16, "Fb2": 16, ",,F": 17, ",,E#": 17, "F2": 17, "E#2": 17, ",,F#": 18, ",,Gb": 18,
+    "F#2": 18, "Gb2": 18, ",,G": 19, "G2": 19, ",,G#": 20, ",,Ab": 20, "G#2": 20, "Ab2": 20, ",,A": 21,
+    "A2": 21, ",,A#": 22, ",,Bb": 22, "A#2": 22, "Bb2": 22, ",,B": 23, ",Cb": 23, "B2": 23, "Cb1": 23, ",C": 24,
+    ",,B#": 24, "C1": 24, "B#2": 24, ",C#": 25, ",Db": 25, "C#1": 25, "Db1": 25, ",D": 26, "D1": 26, ",D#": 27,
+    ",Eb": 27, "D#1": 27, "Eb1": 27, ",E": 28, ",Fb": 28, "E1": 28, "Fb1": 28, ",F": 29, ",E#": 29, "F1": 29,
+    "E#1": 29, ",F#": 30, ",Gb": 30, "F#1": 30, "Gb1": 30, ",G": 31, "G1": 31, ",G#": 32, ",Ab": 32, "G#1": 32,
+    "Ab1": 32, ",A": 33, "A1": 33, ",A#": 34, ",Bb": 34, "A#1": 34, "Bb1": 34, ",B": 35, "Cb": 35, "B1": 35,
+    "Cb0": 35, "C": 36, ",B#": 36, "C0": 36, "B#1": 36, "C#": 37, "Db": 37, "C#0": 37, "Db0": 37, "D": 38,
+    "D0": 38, "D#": 39, "Eb": 39, "D#0": 39, "Eb0": 39, "E": 40, "Fb": 40, "E0": 40, "Fb0": 40, "F": 41,
+    "E#": 41, "F0": 41, "E#0": 41, "F#": 42, "Gb": 42, "F#0": 42, "Gb0": 42, "G": 43, "G0": 43, "G#": 44,
+    "Ab": 44, "G#0": 44, "Ab0": 44, "A": 45, "A0": 45, "A#": 46, "Bb": 46, "A#0": 46, "Bb0": 46, "B": 47,
+    "cb": 47, "B0": 47, "cb0": 47, "c": 48, "B#": 48, "c0": 48, "B#0": 48, "c#": 49, "db": 49, "c#0": 49,
+    "db0": 49, "d": 50, "d0": 50, "d#": 51, "eb": 51, "d#0": 51, "eb0": 51, "e": 52, "fb": 52, "e0": 52,
+    "fb0": 52, "f": 53, "e#": 53, "f0": 53, "e#0": 53, "f#": 54, "gb": 54, "f#0": 54, "gb0": 54, "g": 55,
+    "g0": 55, "g#": 56, "ab": 56, "g#0": 56, "ab0": 56, "a": 57, "a0": 57, "a#": 58, "bb": 58, "a#0": 58,
+    "bb0": 58, "b": 59, "cb'": 59, "b0": 59, "cb1": 59, "c'": 60, "b#": 60, "c1": 60, "b#0": 60, "c#'": 61,
+    "db'": 61, "c#1": 61, "db1": 61, "d'": 62, "d1": 62, "d#'": 63, "eb'": 63, "d#1": 63, "eb1": 63, "e'": 64,
+    "fb'": 64, "e1": 64, "fb1": 64, "f'": 65, "e#'": 65, "f1": 65, "e#1": 65, "f#'": 66, "gb'": 66, "f#1": 66,
+    "gb1": 66, "g'": 67, "g1": 67, "g#'": 68, "ab'": 68, "g#1": 68, "ab1": 68, "a'": 69, "a1": 69, "a#'": 70,
+    "bb'": 70, "a#1": 70, "bb1": 70, "b'": 71, "cb''": 71, "b1": 71, "cb2": 71, "c''": 72, "b#'": 72, "c2": 72,
+    "b#1": 72, "c#''": 73, "db''": 73, "c#2": 73, "db2": 73, "d''": 74, "d2": 74, "d#''": 75, "eb''": 75,
+    "d#2": 75, "eb2": 75, "e''": 76, "fb''": 76, "e2": 76, "fb2": 76, "f''": 77, "e#''": 77, "f2": 77,
+    "e#2": 77, "f#''": 78, "gb''": 78, "f#2": 78, "gb2": 78, "g''": 79, "g2": 79, "g#''": 80, "ab''": 80,
+    "g#2": 80, "ab2": 80, "a''": 81, "a2": 81, "a#''": 82, "bb''": 82, "a#2": 82, "bb2": 82, "b''": 83,
+    "cb'''": 83, "b2": 83, "cb3": 83, "c'''": 84, "b#''": 84, "c3": 84, "b#2": 84, "c#'''": 85, "db'''": 85,
+    "c#3": 85, "db3": 85, "d'''": 86, "d3": 86, "d#'''": 87, "eb'''": 87, "d#3": 87, "eb3": 87, "e'''": 88,
+    "fb'''": 88, "e3": 88, "fb3": 88, "f'''": 89, "e#'''": 89, "f3": 89, "e#3": 89, "f#'''": 90, "gb'''": 90,
+    "f#3": 90, "gb3": 90, "g'''": 91, "g3": 91, "g#'''": 92, "ab'''": 92, "g#3": 92, "ab3": 92, "a'''": 93,
+    "a3": 93, "a#'''": 94, "bb'''": 94, "a#3": 94, "bb3": 94, "b'''": 95, "cb''''": 95, "b3": 95, "cb4": 95,
+    "c''''": 96, "b#'''": 96, "c4": 96, "b#3": 96, "c#''''": 97, "db''''": 97, "c#4": 97, "db4": 97,
+    "d''''": 98, "d4": 98, "d#''''": 99, "eb''''": 99, "d#4": 99, "eb4": 99, "e''''": 100, "fb''''": 100,
+    "e4": 100, "fb4": 100, "f''''": 101, "e#''''": 101, "f4": 101, "e#4": 101, "f#''''": 102, "gb''''": 102,
+    "f#4": 102, "gb4": 102, "g''''": 103, "g4": 103, "g#''''": 104, "ab''''": 104, "g#4": 104, "ab4": 104,
+    "a''''": 105, "a4": 105, "a#''''": 106, "bb''''": 106, "a#4": 106, "bb4": 106, "b''''": 107, "cb'''''": 107,
+    "b4": 107, "cb5": 107, "c'''''": 108, "b#''''": 108, "c5": 108, "b#4": 108, "c#'''''": 109, "db'''''": 109,
+    "c#5": 109, "db5": 109, "d'''''": 110, "d5": 110, "d#'''''": 111, "eb'''''": 111, "d#5": 111, "eb5": 111,
+    "e'''''": 112, "fb'''''": 112, "e5": 112, "fb5": 112, "f'''''": 113, "e#'''''": 113, "f5": 113, "e#5": 113,
+    "f#'''''": 114, "gb'''''": 114, "f#5": 114, "gb5": 114, "g'''''": 115, "g5": 115, "g#'''''": 116,
+    "ab'''''": 116, "g#5": 116, "ab5": 116, "a'''''": 117, "a5": 117, "a#'''''": 118, "bb'''''": 118,
+    "a#5": 118, "bb5": 118, "b'''''": 119, "cb''''''": 119, "b5": 119, "cb6": 119, "c''''''": 120,
+    "b#'''''": 120, "c6": 120, "b#5": 120, "c#''''''": 121, "db''''''": 121, "c#6": 121, "db6": 121,
+    "d''''''": 122, "d6": 122, "d#''''''": 123, "eb''''''": 123, "d#6": 123, "eb6": 123, "e''''''": 124,
+    "fb''''''": 124, "e6": 124, "fb6": 124, "f''''''": 125, "e#''''''": 125, "f6": 125, "e#6": 125,
+    "f#''''''": 126, "gb''''''": 126, "f#6": 126, "gb6": 126, "g''''''": 127, "g6": 127
+}
+
+
 def to_MIDI_pitch(pitch):
     """map to midi pitch"""
-    MIDI_pitch = {
-        ",,,C": 0, ",,,,B#": 0, "C3": 0, "B#4": 0, ",,,C#": 1, ",,,Db": 1, "C#3": 1, "Db3": 1, ",,,D": 2, "D3": 2,
-        ",,,D#": 3, ",,,Eb": 3, "D#3": 3, "Eb3": 3, ",,,E": 4, ",,,Fb": 4, "E3": 4, "Fb3": 4, ",,,F": 5, ",,,E#": 5,
-        "F3": 5, "E#3": 5, ",,,F#": 6, ",,,Gb": 6, "F#3": 6, "Gb3": 6, ",,,G": 7, "G3": 7, ",,,G#": 8, ",,,Ab": 8,
-        "G#3": 8, "Ab3": 8, ",,,A": 9, "A3": 9, ",,,A#": 10, ",,,Bb": 10, "A#3": 10, "Bb3": 10, ",,,B": 11,
-        ",,Cb": 11, "B3": 11, "Cb2": 11, ",,C": 12, ",,,B#": 12, "C2": 12, "B#3": 12, ",,C#": 13, ",,Db": 13,
-        "C#2": 13, "Db2": 13, ",,D": 14, "D2": 14, ",,D#": 15, ",,Eb": 15, "D#2": 15, "Eb2": 15, ",,E": 16,
-        ",,Fb": 16, "E2": 16, "Fb2": 16, ",,F": 17, ",,E#": 17, "F2": 17, "E#2": 17, ",,F#": 18, ",,Gb": 18,
-        "F#2": 18, "Gb2": 18, ",,G": 19, "G2": 19, ",,G#": 20, ",,Ab": 20, "G#2": 20, "Ab2": 20, ",,A": 21,
-        "A2": 21, ",,A#": 22, ",,Bb": 22, "A#2": 22, "Bb2": 22, ",,B": 23, ",Cb": 23, "B2": 23, "Cb1": 23, ",C": 24,
-        ",,B#": 24, "C1": 24, "B#2": 24, ",C#": 25, ",Db": 25, "C#1": 25, "Db1": 25, ",D": 26, "D1": 26, ",D#": 27,
-        ",Eb": 27, "D#1": 27, "Eb1": 27, ",E": 28, ",Fb": 28, "E1": 28, "Fb1": 28, ",F": 29, ",E#": 29, "F1": 29,
-        "E#1": 29, ",F#": 30, ",Gb": 30, "F#1": 30, "Gb1": 30, ",G": 31, "G1": 31, ",G#": 32, ",Ab": 32, "G#1": 32,
-        "Ab1": 32, ",A": 33, "A1": 33, ",A#": 34, ",Bb": 34, "A#1": 34, "Bb1": 34, ",B": 35, "Cb": 35, "B1": 35,
-        "Cb0": 35, "C": 36, ",B#": 36, "C0": 36, "B#1": 36, "C#": 37, "Db": 37, "C#0": 37, "Db0": 37, "D": 38,
-        "D0": 38, "D#": 39, "Eb": 39, "D#0": 39, "Eb0": 39, "E": 40, "Fb": 40, "E0": 40, "Fb0": 40, "F": 41,
-        "E#": 41, "F0": 41, "E#0": 41, "F#": 42, "Gb": 42, "F#0": 42, "Gb0": 42, "G": 43, "G0": 43, "G#": 44,
-        "Ab": 44, "G#0": 44, "Ab0": 44, "A": 45, "A0": 45, "A#": 46, "Bb": 46, "A#0": 46, "Bb0": 46, "B": 47,
-        "cb": 47, "B0": 47, "cb0": 47, "c": 48, "B#": 48, "c0": 48, "B#0": 48, "c#": 49, "db": 49, "c#0": 49,
-        "db0": 49, "d": 50, "d0": 50, "d#": 51, "eb": 51, "d#0": 51, "eb0": 51, "e": 52, "fb": 52, "e0": 52,
-        "fb0": 52, "f": 53, "e#": 53, "f0": 53, "e#0": 53, "f#": 54, "gb": 54, "f#0": 54, "gb0": 54, "g": 55,
-        "g0": 55, "g#": 56, "ab": 56, "g#0": 56, "ab0": 56, "a": 57, "a0": 57, "a#": 58, "bb": 58, "a#0": 58,
-        "bb0": 58, "b": 59, "cb'": 59, "b0": 59, "cb1": 59, "c'": 60, "b#": 60, "c1": 60, "b#0": 60, "c#'": 61,
-        "db'": 61, "c#1": 61, "db1": 61, "d'": 62, "d1": 62, "d#'": 63, "eb'": 63, "d#1": 63, "eb1": 63, "e'": 64,
-        "fb'": 64, "e1": 64, "fb1": 64, "f'": 65, "e#'": 65, "f1": 65, "e#1": 65, "f#'": 66, "gb'": 66, "f#1": 66,
-        "gb1": 66, "g'": 67, "g1": 67, "g#'": 68, "ab'": 68, "g#1": 68, "ab1": 68, "a'": 69, "a1": 69, "a#'": 70,
-        "bb'": 70, "a#1": 70, "bb1": 70, "b'": 71, "cb''": 71, "b1": 71, "cb2": 71, "c''": 72, "b#'": 72, "c2": 72,
-        "b#1": 72, "c#''": 73, "db''": 73, "c#2": 73, "db2": 73, "d''": 74, "d2": 74, "d#''": 75, "eb''": 75,
-        "d#2": 75, "eb2": 75, "e''": 76, "fb''": 76, "e2": 76, "fb2": 76, "f''": 77, "e#''": 77, "f2": 77,
-        "e#2": 77, "f#''": 78, "gb''": 78, "f#2": 78, "gb2": 78, "g''": 79, "g2": 79, "g#''": 80, "ab''": 80,
-        "g#2": 80, "ab2": 80, "a''": 81, "a2": 81, "a#''": 82, "bb''": 82, "a#2": 82, "bb2": 82, "b''": 83,
-        "cb'''": 83, "b2": 83, "cb3": 83, "c'''": 84, "b#''": 84, "c3": 84, "b#2": 84, "c#'''": 85, "db'''": 85,
-        "c#3": 85, "db3": 85, "d'''": 86, "d3": 86, "d#'''": 87, "eb'''": 87, "d#3": 87, "eb3": 87, "e'''": 88,
-        "fb'''": 88, "e3": 88, "fb3": 88, "f'''": 89, "e#'''": 89, "f3": 89, "e#3": 89, "f#'''": 90, "gb'''": 90,
-        "f#3": 90, "gb3": 90, "g'''": 91, "g3": 91, "g#'''": 92, "ab'''": 92, "g#3": 92, "ab3": 92, "a'''": 93,
-        "a3": 93, "a#'''": 94, "bb'''": 94, "a#3": 94, "bb3": 94, "b'''": 95, "cb''''": 95, "b3": 95, "cb4": 95,
-        "c''''": 96, "b#'''": 96, "c4": 96, "b#3": 96, "c#''''": 97, "db''''": 97, "c#4": 97, "db4": 97,
-        "d''''": 98, "d4": 98, "d#''''": 99, "eb''''": 99, "d#4": 99, "eb4": 99, "e''''": 100, "fb''''": 100,
-        "e4": 100, "fb4": 100, "f''''": 101, "e#''''": 101, "f4": 101, "e#4": 101, "f#''''": 102, "gb''''": 102,
-        "f#4": 102, "gb4": 102, "g''''": 103, "g4": 103, "g#''''": 104, "ab''''": 104, "g#4": 104, "ab4": 104,
-        "a''''": 105, "a4": 105, "a#''''": 106, "bb''''": 106, "a#4": 106, "bb4": 106, "b''''": 107, "cb'''''": 107,
-        "b4": 107, "cb5": 107, "c'''''": 108, "b#''''": 108, "c5": 108, "b#4": 108, "c#'''''": 109, "db'''''": 109,
-        "c#5": 109, "db5": 109, "d'''''": 110, "d5": 110, "d#'''''": 111, "eb'''''": 111, "d#5": 111, "eb5": 111,
-        "e'''''": 112, "fb'''''": 112, "e5": 112, "fb5": 112, "f'''''": 113, "e#'''''": 113, "f5": 113, "e#5": 113,
-        "f#'''''": 114, "gb'''''": 114, "f#5": 114, "gb5": 114, "g'''''": 115, "g5": 115, "g#'''''": 116,
-        "ab'''''": 116, "g#5": 116, "ab5": 116, "a'''''": 117, "a5": 117, "a#'''''": 118, "bb'''''": 118,
-        "a#5": 118, "bb5": 118, "b'''''": 119, "cb''''''": 119, "b5": 119, "cb6": 119, "c''''''": 120,
-        "b#'''''": 120, "c6": 120, "b#5": 120, "c#''''''": 121, "db''''''": 121, "c#6": 121, "db6": 121,
-        "d''''''": 122, "d6": 122, "d#''''''": 123, "eb''''''": 123, "d#6": 123, "eb6": 123, "e''''''": 124,
-        "fb''''''": 124, "e6": 124, "fb6": 124, "f''''''": 125, "e#''''''": 125, "f6": 125, "e#6": 125,
-        "f#''''''": 126, "gb''''''": 126, "f#6": 126, "gb6": 126, "g''''''": 127, "g6": 127
-    }
     if isinstance(pitch, (int, np.int_)):
         return int(pitch)
     elif isinstance(pitch, str):
@@ -75,7 +77,7 @@ def to_MIDI_pitch(pitch):
 
 @contextmanager
 def transposed(event, transpose_event):
-    event._transpose_list += [(transpose_event._transpose, transpose_event._tonic, transpose_event._scale)]
+    event._transpose_list += [(transpose_event._transpose, transpose_event._scale)]
     event._transpose_list += transpose_event._transpose_list
     yield
     event._transpose_list = event._transpose_list[:-1-len(transpose_event._transpose_list)]
@@ -118,7 +120,7 @@ def metrical_grid(nested_idx):
     return idx
 
 
-class Scale(object):
+class BareScale(object):
 
     def __init__(self, intervals=range(12), pitches=None):
         if pitches is not None:
@@ -135,8 +137,25 @@ class Scale(object):
     def get_interval(self, scale_degree):
         return self._intervals[scale_degree % len(self._intervals)] + 12 * (scale_degree // len(self._intervals))
 
-    def get_scale_degree(self, pitch, tonic):
-        return np.argmin((self._intervals + to_MIDI_pitch(tonic) - to_MIDI_pitch(pitch)) % 12)
+
+class TonicScale(BareScale):
+
+    def __init__(self, tonic="c'", intervals=range(12), pitches=None):
+        super(TonicScale, self).__init__(intervals=intervals, pitches=pitches)
+        if pitches is not None:
+            self._tonic = pitches[0]
+        else:
+            self._tonic = tonic
+
+    def __str__(self):
+        return str([to_MIDI_pitch(self._tonic) + i for i in self._intervals])
+
+    def get_scale_degree(self, pitch):
+        return np.argmin((self._intervals + to_MIDI_pitch(self._tonic) - to_MIDI_pitch(pitch)) % 12)
+
+    def is_in_scale(self, pitch):
+        degree = self.get_scale_degree(pitch)
+        return (to_MIDI_pitch(self._tonic) + self.get_interval(degree) - to_MIDI_pitch(pitch)) % 12 == 0
 
 
 class Event(object):
@@ -267,9 +286,8 @@ class Event(object):
         Event.write_indent(file=file)
         print("sleep {}".format(time), file=file)
 
-    def __init__(self, transpose=0, tonic=0, scale=Scale()):
+    def __init__(self, transpose=0, scale=TonicScale()):
         self._transpose = transpose
-        self._tonic = tonic
         self._scale = scale
         self._transpose_list = []
 
@@ -314,9 +332,8 @@ class Chord(Event):
                  tie=False,
                  staccato=False,
                  transpose=0,
-                 tonic=0,
-                 scale=Scale()):
-        super(Chord, self).__init__(transpose=transpose, tonic=tonic, scale=scale)
+                 scale=TonicScale()):
+        super(Chord, self).__init__(transpose=transpose, scale=scale)
         self._intervals = list(sorted(intervals))
         self._octaves = 1 + (max(self._intervals) - min(self._intervals)) // 12
         self._base = base
@@ -359,14 +376,14 @@ class Chord(Event):
         return Event.time_interval(self._extent)
 
     def write(self, file):
-        transpose_list = [(self._transpose, self._tonic, self._scale)] + self._transpose_list
+        transpose_list = [(self._transpose, self._scale)] + self._transpose_list
         duration = Event.time_interval(self._duration)
         if self._staccato:
             duration = 0.01
         for interval in self._intervals:
             pitch = to_MIDI_pitch(self._base) + interval
-            for transpose, tonic, scale in transpose_list:
-                scale_degree = scale.get_scale_degree(pitch=pitch, tonic=tonic)
+            for transpose, scale in transpose_list:
+                scale_degree = scale.get_scale_degree(pitch=pitch)
                 pitch -= scale.get_interval(scale_degree=scale_degree)
                 pitch += scale.get_interval(scale_degree=scale_degree + transpose)
             Event.write_indent(file)
@@ -383,8 +400,7 @@ class Tone(Chord):
                  tie=False,
                  staccato=False,
                  transpose=0,
-                 tonic=0,
-                 scale=Scale()):
+                 scale=TonicScale()):
         super(Tone, self).__init__(base=pitch,
                                    intervals=[0],
                                    duration=duration,
@@ -393,7 +409,8 @@ class Tone(Chord):
                                    symbol=symbol,
                                    tie=tie,
                                    staccato=staccato,
-                                   transpose=transpose)
+                                   transpose=transpose,
+                                   scale=scale)
 
     def __str__(self):
         if Event._str_verbose:
@@ -406,10 +423,27 @@ class Tone(Chord):
 
 class Beat(Event):
 
-    def __init__(self, extent=0., amplitude=1., symbol=None):
-        super(Beat, self).__init__(transpose=0, tonic=0, scale=Scale())
+    sounds = {
+        "snare": ":drum_snare_soft",
+        "tab": ":tabla_ghe1",
+        "click": ":click",
+        "kick": ":drum_bass_soft",
+        # "kick": ":drum_heavy_kick",
+        "hh_c": ":drum_cymbal_closed",
+        "hh_o": ":drum_cymbal_open",
+        "ride": ":drum_cymbal_hard",
+        # "ride": ":drum_cymbal_soft"
+    }
+
+
+
+
+
+    def __init__(self, extent=0., amplitude=1., symbol=None, sound=3):
+        super(Beat, self).__init__(transpose=0, scale=TonicScale())
         self._extent = extent
         self._amplitude = amplitude
+        self._sound = sound
         if symbol is not None:
             self.create_symbol(symbol)
 
@@ -424,12 +458,12 @@ class Beat(Event):
 
     def write(self, file):
         Event.write_indent(file)
-        print("play_beat amp: {}".format(self._amplitude), file=file)
+        print("play_beat smp: {}, amp: {}".format(self.sounds[self._sound], self._amplitude), file=file)
 
 
 class Rest(Event):
     def __init__(self, extent, symbol=None):
-        super(Rest, self).__init__(transpose=0, tonic=0, scale=Scale())
+        super(Rest, self).__init__(transpose=0, scale=TonicScale())
         self._extent = extent
         if symbol is not None:
             self.create_symbol(symbol)
@@ -467,8 +501,8 @@ class Sequence(Event):
             else:
                 yield event
 
-    def __init__(self, sequence, symbol=None, transpose=0, tonic=0, scale=Scale(), make_deepcopy=True):
-        super(Sequence, self).__init__(transpose=transpose, tonic=tonic, scale=scale)
+    def __init__(self, sequence, symbol=None, transpose=0, scale=TonicScale(), make_deepcopy=True):
+        super(Sequence, self).__init__(transpose=transpose, scale=scale)
         # self._sequence = Sequence.flatten(sequence) # this triggers the bug from above on multiple iterations through sequence
         self._sequence = list(Sequence.flatten(sequence))
         if make_deepcopy:
@@ -535,8 +569,10 @@ class Measure(Sequence):
                  amplitude=lambda nested_idx: 0.05 + 0.95 * np.exp(-metrical_grid(nested_idx) / 2)):
                  # amplitude=lambda nested_idx: 0.1 + 0.9 / (metrical_grid(nested_idx) + 1)):
                  # amplitude = lambda nested_idx: 1):
-        if isinstance(events, str) or isinstance(events, Event):
+        if isinstance(events, (str, Event)):
             e = Event.parse_events(events)
+            if make_deepcopy:
+                e = deepcopy(e)
             if e.is_atomic():
                 e._extent = str(extent)+unit
             else:
@@ -544,7 +580,7 @@ class Measure(Sequence):
             if isinstance(e, Chord):
                 e._duration = str(extent)+unit
             if isinstance(e, (Chord, Beat)):
-                e._amplitude = amplitude(nested_idx=nested_idx)
+                e._amplitude *= amplitude(nested_idx=nested_idx)
             sequence = [e]
         else:
             sequence = []
@@ -578,8 +614,8 @@ class Parallel(Event):
         else:
             raise UserWarning("Don't know how to handle event {} in parallelization".format(event))
 
-    def __init__(self, block, symbol=None, transpose=0, tonic=0, scale=Scale(), make_deepcopy=True):
-        super(Parallel, self).__init__(transpose=transpose, tonic=tonic, scale=scale)
+    def __init__(self, block, symbol=None, transpose=0, scale=TonicScale(), make_deepcopy=True):
+        super(Parallel, self).__init__(transpose=transpose, scale=scale)
         self._block = block
         if make_deepcopy:
             for i in range(len(self._block)):
@@ -624,8 +660,8 @@ class Parallel(Event):
 
 class Transposed(Event):
 
-    def __init__(self, event, transpose, tonic=0, scale=Scale(), make_deepcopy=False):
-        super(Transposed, self).__init__(transpose=transpose, tonic=tonic, scale=scale)
+    def __init__(self, event, transpose, scale=TonicScale(), make_deepcopy=False):
+        super(Transposed, self).__init__(transpose=transpose, scale=scale)
         if not event.is_transposable():
             raise UserWarning("Cannot transpose event {}".format(event))
         if make_deepcopy:
@@ -653,7 +689,7 @@ class Transposed(Event):
 class Symbol(Event):
 
     def __init__(self, symbol):
-        super(Symbol, self).__init__(transpose=0, tonic=0, scale=Scale())
+        super(Symbol, self).__init__(transpose=0, scale=TonicScale())
         self._symbol = symbol
 
     def extent(self):
@@ -666,8 +702,8 @@ class Symbol(Event):
 
 class Loop(Event):
 
-    def __init__(self, event, symbol=None, repeat=None, active=True, transpose=0, tonic=0, scale=Scale()):
-        super(Loop, self).__init__(transpose=transpose, tonic=tonic, scale=scale)
+    def __init__(self, event, symbol=None, repeat=None, active=True, transpose=0, scale=TonicScale()):
+        super(Loop, self).__init__(transpose=transpose, scale=scale)
         self._symbol = symbol if symbol is not None else Event.random_string()
         self._repeat = repeat
         with transposed(event, self):
@@ -703,10 +739,78 @@ class Loop(Event):
         print("end", file=file)
 
 
+class Distribution(object):
+
+    def __init__(self):
+        self._distribution = None
+        self._alphabet = None
+
+    def get_alphabet(self):
+        return deepcopy(self._alphabet)
+
+    def get_distribution(self, normalize=False):
+        return deepcopy(self._distribution)
+
+    def draw(self, size=1):
+        try:
+            return np.random.choice(self.get_alphabet(), p=self.get_distribution(True), size=size)
+        except ValueError:
+            print("probabilities: {}".format(self.get_distribution(True)))
+            raise
+
+
+class PitchDistribution(Distribution):
+
+    def __init__(self):
+        super(PitchDistribution, self).__init__()
+        self._alphabet = np.array(range(min(MIDI_pitch.values()), max(MIDI_pitch.values()) + 1))
+
+
+class ScaleDistribution(PitchDistribution):
+
+    def __init__(self, scale):
+        super(ScaleDistribution, self).__init__()
+        self._scale = scale
+        self._distribution = np.array([(1. if self._scale.is_in_scale(pitch) else 0.) for pitch in self._alphabet])
+        self._distribution /= self._distribution.sum()
+
+
+class PitchRange(PitchDistribution):
+
+    def __init__(self, min_pitch, max_pitch):
+        super(PitchRange, self).__init__()
+        self._min_pitch = min_pitch
+        self._max_pitch = max_pitch
+
+    def get_distribution(self, normalize=False):
+        return [(1 / (
+        self._max_pitch - self._min_pitch + 1) if pitch >= self._min_pitch and pitch <= self._max_pitch else 0) for
+                pitch in self._alphabet]
+
+
+class ProductDist(Distribution):
+
+    def __init__(self, dist_list):
+        super(ProductDist, self).__init__()
+        # use log representation to combine distributions
+        self._distribution = np.zeros(len(list(dist_list[0].get_distribution())))
+        self._alphabet = dist_list[0].get_alphabet()
+        for dist in dist_list:
+            if list(dist.get_alphabet()) != list(self._alphabet):
+                raise UserWarning("Alphabets do not match:\n    {}\n    {}".format(list(dist.get_alphabet()),
+                                                                                   list(self._alphabet)))
+            d = np.log(np.array(dist.get_distribution(normalize=True)))
+            d -= max(d)  # preserve high probabilities, risk underflow for low probabilities
+            self._distribution += d
+        self._distribution -= max(self._distribution)
+        self._distribution = np.exp(self._distribution)
+        self._distribution /= np.sum(self._distribution)
+
+
 if __name__ == "__main__":
     with io.StringIO() as file:
         # create events and write to string-file
-        Event.set_beat("380bpm")
+        Event.set_beat("80bpm")
         print("# main function", file=file)
         print("def song", file=file)
         Event._indent += 1
@@ -723,14 +827,15 @@ if __name__ == "__main__":
                      ["e'/2.", "e'/2."],
                      ["g'.", "g'.", "g'.", "g'."],
                      ["c'/1."]], extent=20)
-        beat = Beat(extent="1/16")
-        m = Measure([
+        beat = Beat(extent="1/16", sound=1)
+        beats = Measure([
             [[[beat, beat, beat], [beat, beat]],
              [[beat,       beat], [beat, beat]]],
             [[[beat,       beat], [beat, beat]],
              [[beat,       beat], [beat, beat]]],
             # [beat, beat, beat, beat],
         ], extent=8)
+        beats = Measure([[[[[Beat(extent=1, sound='kick')] * 2] * 2] * 2] * 2], 4)
         # m.write(file)
         # Event.parse_event('r r/1').write(file)
         ## basic beat
@@ -749,11 +854,21 @@ if __name__ == "__main__":
         ##
         ## alle meine entchen
         alle_mein_entchen = Event.parse_events("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1")
-        scale = Scale(pitches=["c", "d", "e", "f", "g", "a", "b", "c"])
+        scale = TonicScale(tonic="c'", pitches=["c", "d", "e", "f", "g", "a", "b", "c"])
         print(scale)
         ##
+        pitch_range = PitchRange(60, 72)
+        scale_dist = ScaleDistribution(scale=TonicScale(pitches=["c", "d", "e", "f", "g", "a", "b"]))
+        prod_dist = ProductDist([pitch_range, scale_dist])
         Loop(Sequence([
-            Transposed(alle_mein_entchen, transpose=2, tonic='c', scale=scale),
+            Parallel([
+                Measure([Tone(pitch=str(pitch), amplitude=0.1) for pitch in prod_dist.draw(16)], 4),
+                Measure([[Beat(sound="kick"), Beat(sound="hh_c")],
+                         ["r", [Beat(sound="hh_c"), Beat(sound="ride")]],
+                         ["r", [Beat(sound="hh_c"), Beat(sound="snare", amplitude=4)]],
+                         ["r", [Beat(sound="hh_c"), Beat(sound="kick", amplitude=0.8)]]], 4)
+            ]),
+            # Transposed(alle_mein_entchen, transpose=2, scale=scale),
             # m,
             ## quintuplets
             Parallel([
