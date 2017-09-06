@@ -61,6 +61,14 @@ MIDI_pitch = {
 }
 
 
+def min_pitch():
+    return min(MIDI_pitch.values())
+
+
+def max_pitch():
+    return max(MIDI_pitch.values())
+
+
 def to_MIDI_pitch(pitch):
     """map to midi pitch"""
     if isinstance(pitch, (int, np.int_)):
@@ -120,7 +128,23 @@ def metrical_grid(nested_idx):
     return idx
 
 
-class BareScale(object):
+def repack_list(list_to_repack, package_sizes=()):
+    if not package_sizes:
+        return list_to_repack
+    repacked_list = []
+    while list_to_repack:
+        package = []
+        for idx in range(package_sizes[0]):
+            package.append(list_to_repack[0])
+            list_to_repack = list_to_repack[1:]
+            if not list_to_repack:
+                break
+        repacked_list.append(package)
+    package_sizes = package_sizes[1:]
+    return repack_list(repacked_list, package_sizes)
+
+
+class BareScale:
 
     def __init__(self, intervals=range(12), pitches=None):
         if pitches is not None:
@@ -131,7 +155,7 @@ class BareScale(object):
         if self._intervals[-1] > 11:
             raise UserWarning("Scale cannot contain intervals of an octave or above.")
 
-    def __str__(self):
+    def __repr__(self):
         return str(self._intervals)
 
     def get_interval(self, scale_degree):
@@ -147,7 +171,7 @@ class TonicScale(BareScale):
         else:
             self._tonic = tonic
 
-    def __str__(self):
+    def __repr__(self):
         return str([to_MIDI_pitch(self._tonic) + i for i in self._intervals])
 
     def get_scale_degree(self, pitch):
@@ -158,7 +182,7 @@ class TonicScale(BareScale):
         return (to_MIDI_pitch(self._tonic) + self.get_interval(degree) - to_MIDI_pitch(pitch)) % 12 == 0
 
 
-class Event(object):
+class Event:
 
     _indent = 0
     _beat = 1
@@ -345,7 +369,7 @@ class Chord(Event):
         if symbol is not None:
             self.create_symbol(symbol)
 
-    def __str__(self):
+    def __repr__(self):
         if Event._str_verbose:
             return "Chord({}[{}]/{}+{}{}{} {}|{} {})".format(tuple(self._intervals),
                                                              self._octaves,
@@ -412,9 +436,9 @@ class Tone(Chord):
                                    transpose=transpose,
                                    scale=scale)
 
-    def __str__(self):
+    def __repr__(self):
         if Event._str_verbose:
-            return Chord.__str__(self)
+            return Chord.__repr__(self)
         else:
             return "{}+{}:{}".format(self._base,
                                      self._transpose,
@@ -435,10 +459,6 @@ class Beat(Event):
         # "ride": ":drum_cymbal_soft"
     }
 
-
-
-
-
     def __init__(self, extent=0., amplitude=1., symbol=None, sound=3):
         super(Beat, self).__init__(transpose=0, scale=TonicScale())
         self._extent = extent
@@ -447,7 +467,7 @@ class Beat(Event):
         if symbol is not None:
             self.create_symbol(symbol)
 
-    def __str__(self):
+    def __repr__(self):
         return "beat:{}:{}".format(self._extent, self._amplitude)
 
     def is_atomic(self):
@@ -468,7 +488,7 @@ class Rest(Event):
         if symbol is not None:
             self.create_symbol(symbol)
 
-    def __str__(self):
+    def __repr__(self):
         return "r:{}".format(self._extent)
 
     def is_atomic(self):
@@ -511,7 +531,7 @@ class Sequence(Event):
         if symbol is not None:
             self.create_symbol(symbol)
 
-    def __str__(self):
+    def __repr__(self):
         s = "||["
         first = True
         for e in self._sequence:
@@ -566,9 +586,7 @@ class Measure(Sequence):
                  symbol=None,
                  make_deepcopy=True,
                  nested_idx=(1,),
-                 amplitude=lambda nested_idx: 0.05 + 0.95 * np.exp(-metrical_grid(nested_idx) / 2)):
-                 # amplitude=lambda nested_idx: 0.1 + 0.9 / (metrical_grid(nested_idx) + 1)):
-                 # amplitude = lambda nested_idx: 1):
+                 amplitude=lambda nested_idx: 0.05 + 0.95 * np.exp(-metrical_grid(nested_idx) / 3)):
         if isinstance(events, (str, Event)):
             e = Event.parse_events(events)
             if make_deepcopy:
@@ -623,7 +641,7 @@ class Parallel(Event):
         if symbol is not None:
             self.create_symbol(symbol)
 
-    def __str__(self):
+    def __repr__(self):
         s = "==["
         first = True
         for e in self._block:
@@ -669,7 +687,7 @@ class Transposed(Event):
         else:
             self._event = event
 
-    def __str__(self):
+    def __repr__(self):
         return "T("+str(self._event)+", {})".format(self._transpose)
 
     def is_atomic(self):
@@ -712,7 +730,7 @@ class Loop(Event):
         if active:
             Event.add_loop(self._symbol)
 
-    def __str__(self):
+    def __repr__(self):
         return "Loop("+self._symbol+")"
 
     def extent(self):
@@ -739,72 +757,154 @@ class Loop(Event):
         print("end", file=file)
 
 
-class Distribution(object):
+class TimeSeriesModel:
 
-    def __init__(self):
-        self._distribution = None
-        self._alphabet = None
+    def __init__(self, alphabet):
+        self._alphabet = alphabet
 
-    def get_alphabet(self):
-        return deepcopy(self._alphabet)
-
-    def get_distribution(self, normalize=False):
-        return deepcopy(self._distribution)
-
-    def draw(self, size=1):
+    def sample(self, history):
+        dist = [self.probability(history, event) for event in self._alphabet]
         try:
-            return np.random.choice(self.get_alphabet(), p=self.get_distribution(True), size=size)
+            return np.random.choice(self._alphabet, p=dist)
         except ValueError:
-            print("probabilities: {}".format(self.get_distribution(True)))
+            print("probabilities: {}".format(dist))
+            print("sum: {}".format(np.sum(dist)))
             raise
 
+    def probability(self, history, event):
+        return 1 / len(self._alphabet)
 
-class PitchDistribution(Distribution):
 
-    def __init__(self):
-        super(PitchDistribution, self).__init__()
-        self._alphabet = np.array(range(min(MIDI_pitch.values()), max(MIDI_pitch.values()) + 1))
+class IntervalSeries(TimeSeriesModel):
+
+    def __init__(self, intervals, time_delay=1, epsilon=0):
+        super(IntervalSeries, self).__init__([pitch for pitch in range(min_pitch(), max_pitch() + 1)])
+        self._intervals = np.array(intervals)
+        self._time_delay = time_delay
+        self._epsilon = epsilon
+        self._uniform = 1 / len(self._alphabet)
+
+    def probability(self, history, event):
+        if len(history) < self._time_delay:
+            return 1 / len(self._alphabet)
+        else:
+            shifted = (history[-self._time_delay] + self._intervals)
+            in_range = len(np.nonzero(np.logical_and(min_pitch() <= shifted, max_pitch() >= shifted))[0])
+            prob = 0
+            if history[-self._time_delay] - event in self._intervals:
+                prob += 1 / in_range
+            return  (1 - self._epsilon) * prob + self._epsilon * self._uniform
+
+class TimeSeriesProduct(TimeSeriesModel):
+
+    def __init__(self, list_of_models):
+        alphabet = list(list_of_models[0]._alphabet)
+        for model in list_of_models:
+            if list(model._alphabet) != list(alphabet):
+                raise UserWarning("Alphabets do not match:\n    {}\n    {}".format(list(model._alphabet),
+                                                                                   list(alphabet)))
+        super(TimeSeriesProduct, self).__init__(alphabet)
+        self._list_of_models = list_of_models
+
+    def compute_product(self, history):
+        dist = []
+        for e in self._alphabet:
+            prob = None
+            for idx, model in enumerate(self._list_of_models):
+                if prob is None:
+                    prob = model.probability(history, e)
+                else:
+                    prob *= model.probability(history, e)
+            dist.append(prob)
+        dist = np.array(dist)
+        dist /= dist.sum()
+        return dist
+
+    def sample(self, history):
+        return np.random.choice(self._alphabet, p=self.compute_product(history))
+
+    def probability(self, history, event):
+        for prob, e in zip(self.compute_product(history), self._alphabet):
+            if e == event:
+                return prob
+        raise UserWarning("Event {} not found in alphabet {}".format(event, self._alphabet))
+
+
+class PitchDistribution(TimeSeriesModel):
+
+    pitch_range = np.array(range(min_pitch(), max_pitch() + 1))
+
+    def __init__(self, distribution, epsilon=0):
+        super(PitchDistribution, self).__init__(self.pitch_range)
+        distribution = np.array(distribution)
+        self._distribution = (1 - epsilon) * distribution + epsilon * np.ones_like(distribution) / len(distribution)
+
+    def sample(self, history):
+        try:
+            return np.random.choice(self._alphabet, p=self._distribution)
+        except ValueError:
+            print("probabilities: {}".format(self._distribution))
+            raise
+
+    def probability(self, history, event):
+        for e, prob in zip(self._alphabet, self._distribution):
+            if e == event:
+                return prob
+        raise UserWarning("Event {} not found in alphabet {}".format(event, self._alphabet))
 
 
 class ScaleDistribution(PitchDistribution):
 
-    def __init__(self, scale):
-        super(ScaleDistribution, self).__init__()
+    def __init__(self, scale, epsilon=0):
         self._scale = scale
-        self._distribution = np.array([(1. if self._scale.is_in_scale(pitch) else 0.) for pitch in self._alphabet])
-        self._distribution /= self._distribution.sum()
+        distribution = np.array([(1. if self._scale.is_in_scale(pitch) else 0.) for pitch in self.pitch_range])
+        distribution /= distribution.sum()
+        super(ScaleDistribution, self).__init__(distribution, epsilon)
 
 
 class PitchRange(PitchDistribution):
 
-    def __init__(self, min_pitch, max_pitch):
-        super(PitchRange, self).__init__()
+    def __init__(self, min_pitch, max_pitch, epsilon=0):
         self._min_pitch = min_pitch
         self._max_pitch = max_pitch
+        distribution = [
+            (1 / (self._max_pitch - self._min_pitch + 1)
+             if pitch >= self._min_pitch and pitch <= self._max_pitch else 0)
+            for pitch in self.pitch_range
+            ]
+        super(PitchRange, self).__init__(distribution, epsilon)
 
-    def get_distribution(self, normalize=False):
-        return [(1 / (
-        self._max_pitch - self._min_pitch + 1) if pitch >= self._min_pitch and pitch <= self._max_pitch else 0) for
-                pitch in self._alphabet]
 
+class BeamInference:
 
-class ProductDist(Distribution):
+    def __init__(self, n_beams, model):
+        self._model = model
+        self._beams = [[] for _ in range(n_beams)]
+        self._log_likes = [0. for _ in range(n_beams)]
 
-    def __init__(self, dist_list):
-        super(ProductDist, self).__init__()
-        # use log representation to combine distributions
-        self._distribution = np.zeros(len(list(dist_list[0].get_distribution())))
-        self._alphabet = dist_list[0].get_alphabet()
-        for dist in dist_list:
-            if list(dist.get_alphabet()) != list(self._alphabet):
-                raise UserWarning("Alphabets do not match:\n    {}\n    {}".format(list(dist.get_alphabet()),
-                                                                                   list(self._alphabet)))
-            d = np.log(np.array(dist.get_distribution(normalize=True)))
-            d -= max(d)  # preserve high probabilities, risk underflow for low probabilities
-            self._distribution += d
-        self._distribution -= max(self._distribution)
-        self._distribution = np.exp(self._distribution)
-        self._distribution /= np.sum(self._distribution)
+    def initialize_history(self, history):
+        for b in self._beams:
+            b = list(history)
+
+    def sample(self, steps=1, init_history=None):
+        for _ in range(steps):
+            if init_history is not None:
+                self.initialize_history(init_history)
+            new_beam_list = []
+            for old_beam, old_log_like in zip(self._beams, self._log_likes):
+                likely_events = sorted(
+                    [(event, self._model.probability(old_beam, event)) for event in self._model._alphabet],
+                    key=lambda x: x[1]
+                )[-len(self._beams):]
+                for event, prob in likely_events:
+                    new_beam_list.append((old_beam + [event], old_log_like + np.log(prob)))
+            print("$$$", new_beam_list)
+            for beam_idx, (new_beam, new_log_like) in enumerate(
+                    sorted(new_beam_list, key=lambda x: x[1])[-len(self._beams)]
+            ):
+                self._beams[beam_idx] = new_beam
+                self._log_likes[beam_idx] = new_log_like
+        return self._beams[-1]
 
 
 if __name__ == "__main__":
@@ -859,10 +959,20 @@ if __name__ == "__main__":
         ##
         pitch_range = PitchRange(60, 72)
         scale_dist = ScaleDistribution(scale=TonicScale(pitches=["c", "d", "e", "f", "g", "a", "b"]))
-        prod_dist = ProductDist([pitch_range, scale_dist])
+        time_series_model = TimeSeriesProduct([pitch_range, scale_dist])
+        # time_series_model = TimeSeriesProduct([IntervalSeries([-1, 1]), IntervalSeries([-3, 3], 3, epsilon=0.01)])
+        # rand_sequence = [60]
+        # beam_inference = BeamInference(5, time_series_model)
+        # rand_sequence = beam_inference.sample(steps=16 - len(rand_sequence), init_history=rand_sequence)
+        rand_sequence = [60]
+        for _ in range(16 - len(rand_sequence)):
+            rand_sequence.append(time_series_model.sample(rand_sequence))
+        rand_sequence = [str(pitch) for pitch in rand_sequence]
+        print(rand_sequence)
         Loop(Sequence([
             Parallel([
-                Measure([Tone(pitch=str(pitch), amplitude=0.1) for pitch in prod_dist.draw(16)], 4),
+                Measure(repack_list(rand_sequence, [2, 2, 2]), 4),
+                Measure(repack_list([Beat(sound='hh_c', amplitude=0.4)]*24, [3, 2, 2]), 4),
                 Measure([[Beat(sound="kick"), Beat(sound="hh_c")],
                          ["r", [Beat(sound="hh_c"), Beat(sound="ride")]],
                          ["r", [Beat(sound="hh_c"), Beat(sound="snare", amplitude=4)]],
