@@ -69,6 +69,10 @@ def max_pitch():
     return max(MIDI_pitch.values())
 
 
+def pitch_range():
+    return np.array(range(min_pitch(), max_pitch() + 1))
+
+
 def to_MIDI_pitch(pitch):
     """map to midi pitch"""
     if isinstance(pitch, (int, np.int_)):
@@ -759,11 +763,46 @@ class Loop(Event):
 
 class TimeSeriesModel:
 
-    def __init__(self, alphabet):
+    def __init__(self, alphabet, cache_size=1):
         self._alphabet = alphabet
+        self._normalize = False
+        self._cache_size = cache_size
+        self._cache_keys = []
+        self._cache_dict = {}
+
+    def set_cache_size(self, cache_size):
+        self._cache_size = cache_size
+        while len(self._cache_keys) > self._cache_size:
+            self.pop_cache()
+
+    def pop_cache(self):
+        key = self._cache_keys.pop(0)
+        del self._cache_dict[key]
+
+    def insert_in_cache(self, history_tuple, distribution):
+        self._cache_keys.append(history_tuple)
+        self._cache_dict[history_tuple] = distribution
+
+    def probability(self, history, event):
+        return 1 / len(self._alphabet)
+
+    def get_distribution(self, history):
+        h_tuple = tuple(history)
+        if h_tuple in self._cache_dict:
+            dist = self._cache_dict[h_tuple]
+        else:
+            dist = [self.probability(history, event) for event in self._alphabet]
+            if self._normalize:
+                dist = np.array(dist)
+                dist /= dist.sum()
+            if self._cache_size > 0:
+                if len(self._cache_keys) >= self._cache_size:
+                    self.pop_cache()
+                self.insert_in_cache(h_tuple, dist)
+        return dist
 
     def sample(self, history):
-        dist = [self.probability(history, event) for event in self._alphabet]
+        dist = self.get_distribution(history)
         try:
             return np.random.choice(self._alphabet, p=dist)
         except ValueError:
@@ -771,14 +810,57 @@ class TimeSeriesModel:
             print("sum: {}".format(np.sum(dist)))
             raise
 
-    def probability(self, history, event):
-        return 1 / len(self._alphabet)
 
+class MarkovModel(TimeSeriesModel):
+
+    def __init__(self, alphabet, prior_counts=0):
+        super(MarkovModel, self).__init__(alphabet)
+        self._n_gram_counts = {}
+        self._count_sums = {}
+        self._normalize = True
+        self._prior_counts = prior_counts
+
+    def add_data_point(self, n_gram):
+        h_tuple = tuple(n_gram)
+        if h_tuple in self._n_gram_counts:
+            self._n_gram_counts[h_tuple] += 1
+        else:
+            self._n_gram_counts[h_tuple] = 1
+        if len(h_tuple) in self._count_sums:
+            self._count_sums[len(h_tuple)] += 1
+        else:
+            self._count_sums[len(h_tuple)] = 1
+
+    def add_history(self, history):
+        for begin in range(len(history)):
+            self.add_data_point(history[begin:])
+
+    def add_sequence(self, sequence):
+        for end in range(len(sequence)):
+            self.add_history(sequence[0:end + 1])
+
+    def add_corpus(self, corpus):
+        for sequence in corpus:
+            self.add_sequence(sequence)
+
+    def reset_model(self):
+        self._n_gram_counts = {}
+        self._count_sums = {}
+
+    def probability(self, history, event):
+        for context_length in reversed(range(len(history)+1)):
+            if context_length == 0:
+                h_tuple = (event,)
+            else:
+                h_tuple = tuple(history[-context_length:] + [event])
+            if h_tuple in self._n_gram_counts:
+                return self._n_gram_counts[h_tuple] / self._count_sums[len(h_tuple)]
+        return self._prior_counts / self._count_sums[1]
 
 class IntervalSeries(TimeSeriesModel):
 
     def __init__(self, intervals, time_delay=1, epsilon=0):
-        super(IntervalSeries, self).__init__([pitch for pitch in range(min_pitch(), max_pitch() + 1)])
+        super(IntervalSeries, self).__init__([pitch for pitch in pitch_range()])
         self._intervals = np.array(intervals)
         self._time_delay = time_delay
         self._epsilon = epsilon
@@ -793,7 +875,7 @@ class IntervalSeries(TimeSeriesModel):
             prob = 0
             if history[-self._time_delay] - event in self._intervals:
                 prob += 1 / in_range
-            return  (1 - self._epsilon) * prob + self._epsilon * self._uniform
+            return (1 - self._epsilon) * prob + self._epsilon * self._uniform
 
 class TimeSeriesProduct(TimeSeriesModel):
 
@@ -832,10 +914,8 @@ class TimeSeriesProduct(TimeSeriesModel):
 
 class PitchDistribution(TimeSeriesModel):
 
-    pitch_range = np.array(range(min_pitch(), max_pitch() + 1))
-
     def __init__(self, distribution, epsilon=0):
-        super(PitchDistribution, self).__init__(self.pitch_range)
+        super(PitchDistribution, self).__init__(pitch_range())
         distribution = np.array(distribution)
         self._distribution = (1 - epsilon) * distribution + epsilon * np.ones_like(distribution) / len(distribution)
 
@@ -857,7 +937,7 @@ class ScaleDistribution(PitchDistribution):
 
     def __init__(self, scale, epsilon=0):
         self._scale = scale
-        distribution = np.array([(1. if self._scale.is_in_scale(pitch) else 0.) for pitch in self.pitch_range])
+        distribution = np.array([(1. if self._scale.is_in_scale(pitch) else 0.) for pitch in pitch_range()])
         distribution /= distribution.sum()
         super(ScaleDistribution, self).__init__(distribution, epsilon)
 
@@ -870,7 +950,7 @@ class PitchRange(PitchDistribution):
         distribution = [
             (1 / (self._max_pitch - self._min_pitch + 1)
              if pitch >= self._min_pitch and pitch <= self._max_pitch else 0)
-            for pitch in self.pitch_range
+            for pitch in pitch_range()
             ]
         super(PitchRange, self).__init__(distribution, epsilon)
 
@@ -878,33 +958,79 @@ class PitchRange(PitchDistribution):
 class BeamInference:
 
     def __init__(self, n_beams, model):
+        self._n_beams = n_beams
         self._model = model
         self._beams = [[] for _ in range(n_beams)]
-        self._log_likes = [0. for _ in range(n_beams)]
+        self._likelihoods = [1. for _ in range(n_beams)]
 
     def initialize_history(self, history):
         for b in self._beams:
             b = list(history)
 
-    def sample(self, steps=1, init_history=None):
-        for _ in range(steps):
-            if init_history is not None:
-                self.initialize_history(init_history)
+    def sample(self, steps=1, init_history=None, print_progress=False):
+        # initialize history if requested
+        if init_history is not None:
+            self.initialize_history(init_history)
+        # sample 'steps' steps
+        for sample_idx in range(steps):
+            if print_progress > 0:
+                print("Sample #{}".format(sample_idx))
+            n = len(self._beams)
             new_beam_list = []
-            for old_beam, old_log_like in zip(self._beams, self._log_likes):
+            for beam_idx, (old_beam, old_likelihood) in enumerate(zip(self._beams, self._likelihoods)):
+                if print_progress > 1:
+                    print("    beam #{}".format(beam_idx))
+                # find n most likely continuations for each of the n beams
                 likely_events = sorted(
-                    [(event, self._model.probability(old_beam, event)) for event in self._model._alphabet],
+                    zip(self._model._alphabet, self._model.get_distribution(old_beam)),
+                    # [(event, self._model.probability(old_beam, event)) for event in self._model._alphabet],
                     key=lambda x: x[1]
-                )[-len(self._beams):]
+                )[-n:]
+                # append new event and update likelihoods
+                # (add minimal random noise for tie-breaking)
+                noise = 1e-5
                 for event, prob in likely_events:
-                    new_beam_list.append((old_beam + [event], old_log_like + np.log(prob)))
-            print("$$$", new_beam_list)
-            for beam_idx, (new_beam, new_log_like) in enumerate(
-                    sorted(new_beam_list, key=lambda x: x[1])[-len(self._beams)]
-            ):
-                self._beams[beam_idx] = new_beam
-                self._log_likes[beam_idx] = new_log_like
-        return self._beams[-1]
+                    new_beam_list.append((old_beam + [event], old_likelihood * prob * np.random.uniform(1-noise, 1)))
+            # choose n most likely continuations
+            self._beams = []
+            self._likelihoods = []
+            for beam_idx, (new_beam, new_likelihood) in enumerate(reversed(sorted(new_beam_list, key=lambda x: x[1]))):
+                if new_beam not in self._beams:
+                    self._beams.append(new_beam)
+                    self._likelihoods.append(new_likelihood)
+                if len(self._beams) == self._n_beams:
+                    break
+        # return most likely sequence
+        return self._beams[0]
+
+
+class TestModel(TimeSeriesModel):
+    """A test model for beam inference where the initially most likely
+    sequences don't have likely continuations after 'switch_time' steps"""
+
+    def __init__(self, switch_time=5):
+        super(TestModel, self).__init__(list(range(10)))
+        self._normalize = True
+        self._switch_time = switch_time
+
+    def probability(self, history, event):
+        if len(history) == 0:
+            if event == 0:
+                return 1.
+            else:
+                return 0.
+        elif len(history) < self._switch_time:
+            if event - history[-1] == 0:
+                return 0.4
+            elif event - history[-1] == 1:
+                return 0.6
+            else:
+                return 0.
+        else:
+            if np.all((np.array(history) - event) == 0):
+                return 1
+            else:
+                return 1/len(self._alphabet)
 
 
 if __name__ == "__main__":
@@ -950,33 +1076,48 @@ if __name__ == "__main__":
         # print(e)
         # print(Sequence([e, f]))
         ## chords
-        print(Chord(intervals=[0, 4, 7], base="e", duration="1/4", amplitude=0.7).rotate(1))
+        # print(Chord(intervals=[0, 4, 7], base="e", duration="1/4", amplitude=0.7).rotate(1))
         ##
         ## alle meine entchen
         alle_mein_entchen = Event.parse_events("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1")
         scale = TonicScale(tonic="c'", pitches=["c", "d", "e", "f", "g", "a", "b", "c"])
-        print(scale)
+        # print(scale)
         ##
-        pitch_range = PitchRange(60, 72)
+        pitchrange = PitchRange(60, 72)
         scale_dist = ScaleDistribution(scale=TonicScale(pitches=["c", "d", "e", "f", "g", "a", "b"]))
-        time_series_model = TimeSeriesProduct([pitch_range, scale_dist])
+        time_series_model = TimeSeriesProduct([pitchrange, scale_dist])
         # time_series_model = TimeSeriesProduct([IntervalSeries([-1, 1]), IntervalSeries([-3, 3], 3, epsilon=0.01)])
         # rand_sequence = [60]
         # beam_inference = BeamInference(5, time_series_model)
         # rand_sequence = beam_inference.sample(steps=16 - len(rand_sequence), init_history=rand_sequence)
-        rand_sequence = [60]
+        markov_model = MarkovModel(pitch_range())
+        # markov_model.add_corpus([[to_MIDI_pitch(pitch)] for pitch in ["c'", "d'", "e'", "f'", "g'", "a'", "b'", "c''"]])
+        markov_model.add_corpus([[to_MIDI_pitch(pitch) for pitch in ["c'", "d'", "e'", "f'", "g'", "g'", "a'", "a'", "a'", "a'", "g'", "a'", "a'", "a'", "a'", "g'", "f'", "f'", "f'", "f'", "e'", "e'", "g'", "g'", "g'", "g'", "c'"]]] * 100)
+        print(markov_model._n_gram_counts)
+        time_series_model = markov_model
+        rand_sequence = [60, 62, 64, 65, 67]
+        beam_inference = BeamInference(model=time_series_model, n_beams=10)
         for _ in range(16 - len(rand_sequence)):
             rand_sequence.append(time_series_model.sample(rand_sequence))
+            # rand_sequence.append(beam_inference.sample(steps=1, init_history=rand_sequence)[-1])
+            markov_model.add_history(rand_sequence)
+        for count, n_gram in reversed(sorted(zip(markov_model._n_gram_counts.values(), markov_model._n_gram_counts.keys()))):
+            if count > 1:
+                print("{}/{}={} : {}".format(count,
+                                             markov_model._count_sums[len(n_gram)],
+                                             round(count/markov_model._count_sums[len(n_gram)], 3),
+                                             n_gram))
         rand_sequence = [str(pitch) for pitch in rand_sequence]
         print(rand_sequence)
+        n_measures = 2
         Loop(Sequence([
             Parallel([
-                Measure(repack_list(rand_sequence, [2, 2, 2]), 4),
-                Measure(repack_list([Beat(sound='hh_c', amplitude=0.4)]*24, [3, 2, 2]), 4),
-                Measure([[Beat(sound="kick"), Beat(sound="hh_c")],
-                         ["r", [Beat(sound="hh_c"), Beat(sound="ride")]],
-                         ["r", [Beat(sound="hh_c"), Beat(sound="snare", amplitude=4)]],
-                         ["r", [Beat(sound="hh_c"), Beat(sound="kick", amplitude=0.8)]]], 4)
+                Measure(repack_list(rand_sequence, [2, 2, 2]), 4 * n_measures),
+                Sequence([Measure(repack_list([Beat(sound='hh_c', amplitude=0.4)]*24, [3, 2, 2]), 4)] * n_measures),
+                Sequence([Measure([[Beat(sound="kick"), Beat(sound="hh_c")],
+                                   ["r", [Beat(sound="hh_c"), Beat(sound="ride")]],
+                                   ["r", [Beat(sound="hh_c"), Beat(sound="snare", amplitude=4)]],
+                                   ["r", [Beat(sound="hh_c"), Beat(sound="kick", amplitude=0.8)]]], 4)] * n_measures)
             ]),
             # Transposed(alle_mein_entchen, transpose=2, scale=scale),
             # m,
@@ -1013,3 +1154,23 @@ if __name__ == "__main__":
         print(file.getvalue())
         with open("song.rb", 'w') as song:
             print(file.getvalue(), file=song)
+
+        # ## testing markov model
+        # markov_model = MarkovModel(range(10))
+        # markov_model.add_sequence([0, 1, 2, 3, 4])
+        # markov_model.add_sequence([0, 1, 2, 3, 5])
+        # markov_model.add_sequence([6])
+        # markov_model.add_sequence([6])
+        # markov_model.add_sequence([6])
+        # print(markov_model._n_gram_counts)
+        # print(markov_model._count_sums)
+        # print(markov_model.get_distribution([0, 1, 2, 3]))
+
+        # ## testing beam inference
+        # model = TestModel(switch_time=5)
+        # history = []
+        # beam_inference = BeamInference(20, model)
+        # print("probdist {}: {}".format(history, [model.probability(history, event) for event in model._alphabet]))
+        # print(beam_inference.sample(6, history))
+        # print(beam_inference._beams)
+        # print(beam_inference._likelihoods)
