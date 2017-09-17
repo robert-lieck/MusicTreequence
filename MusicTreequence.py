@@ -148,6 +148,27 @@ def repack_list(list_to_repack, package_sizes=()):
     return repack_list(repacked_list, package_sizes)
 
 
+@contextmanager
+def write_song(file=None, print_to_std_out=False):
+    Event.reset()
+    with io.StringIO() as content:
+        Event._output_file = content
+        print("# main function", file=content)
+        print("def song", file=content)
+        Event._indent += 1
+        yield
+        Event._indent -= 1
+        print("end", file=content)
+        print("", file=content)
+        Event.write_loops(content)
+        print("", file=content)
+        Event.write_symbols(content)
+        if print_to_std_out:
+            print(content.getvalue())
+        if file is not None:
+            with open(file, 'w') as song:
+                print(content.getvalue(), file=song)
+
 class BareScale:
 
     def __init__(self, intervals=range(12), pitches=None):
@@ -193,6 +214,14 @@ class Event:
     _symbols = {}
     _loops = set()
     _str_verbose = True
+    _output_file = None
+
+    @staticmethod
+    def reset():
+        _indent = 0
+        _beat = 1
+        _symbols = {}
+        _loops = set()
 
     @staticmethod
     def write_indent(file):
@@ -270,7 +299,7 @@ class Event:
             Event._loops.add(name)
 
     @staticmethod
-    def parse_events(event, agglomeration_type="Sequence"):
+    def parse(event, agglomeration_type="Sequence"):
         if isinstance(event, str):
             # string should be single event or sequence of events separated by whitespace
             list = event.split()
@@ -278,7 +307,7 @@ class Event:
                 # sequence
                 sequence = []
                 for e in list:
-                    sequence.append(Event.parse_events(e))
+                    sequence.append(Event.parse(e))
                 if agglomeration_type == "Sequence":
                     return Sequence(sequence)
                 elif agglomeration_type == "Parallel":
@@ -344,7 +373,7 @@ class Event:
     def extent(self):
         return 0
 
-    def write(self, file):
+    def write(self, file=None):
         pass
 
 
@@ -403,7 +432,9 @@ class Chord(Event):
     def extent(self):
         return Event.time_interval(self._extent)
 
-    def write(self, file):
+    def write(self, file=None):
+        if file is None:
+                file = Event._output_file
         transpose_list = [(self._transpose, self._scale)] + self._transpose_list
         duration = Event.time_interval(self._duration)
         if self._staccato:
@@ -453,11 +484,13 @@ class Tone(Chord):
 
 
 class Beat(Event):
+    """
+    Possible sounds are: "snare", "tab", "kick", "hh_c", "hh_o", "ride"
+    """
 
     sounds = {
         "snare": ":drum_snare_soft",
         "tab": ":tabla_ghe1",
-        "click": ":click",
         "kick": ":drum_bass_soft",
         # "kick": ":drum_heavy_kick",
         "hh_c": ":drum_cymbal_closed",
@@ -466,7 +499,7 @@ class Beat(Event):
         # "ride": ":drum_cymbal_soft"
     }
 
-    def __init__(self, extent=0., amplitude=1., symbol=None, sound=3):
+    def __init__(self, extent=0., amplitude=1., symbol=None, sound='click'):
         super(Beat, self).__init__(transpose=0, scale=TonicScale())
         self._extent = extent
         self._amplitude = amplitude
@@ -483,7 +516,9 @@ class Beat(Event):
     def extent(self):
         return Event.time_interval(self._extent)
 
-    def write(self, file):
+    def write(self, file=None):
+        if file is None:
+                file = Event._output_file
         Event.write_indent(file)
         print("sample {}, amp: {}".format(self.sounds[self._sound], self._amplitude), file=file)
 
@@ -504,7 +539,7 @@ class Rest(Event):
     def extent(self):
         return Event.time_interval(self._extent)
 
-    def write(self, file):
+    def write(self, file=None):
         pass
 
 
@@ -562,7 +597,9 @@ class Sequence(Event):
             extent += event.extent()
         return extent
 
-    def write(self, file):
+    def write(self, file=None):
+        if file is None:
+                file = Event._output_file
         tie_extent = 0
         flat_sequence = list(self._sequence)
         for i in range(len(flat_sequence)):
@@ -595,7 +632,7 @@ class Measure(Sequence):
                  nested_idx=(1,),
                  amplitude=lambda nested_idx: 0.05 + 0.95 * np.exp(-metrical_grid(nested_idx) / 3)):
         if isinstance(events, (str, Event)):
-            e = Event.parse_events(events)
+            e = Event.parse(events)
             if make_deepcopy:
                 e = deepcopy(e)
             if e.is_atomic():
@@ -669,7 +706,9 @@ class Parallel(Event):
             extent = max(extent, event.extent())
         return extent
 
-    def write(self, file):
+    def write(self, file=None):
+        if file is None:
+                file = Event._output_file
         time = 0
         max_offset = 0
         for event, onset, offset in sorted(list(Parallel.flatten(self)), key=lambda x: x[1]):
@@ -706,7 +745,9 @@ class Transposed(Event):
     def extent(self):
         return self._event.extent()
 
-    def write(self, file):
+    def write(self, file=None):
+        if file is None:
+                file = Event._output_file
         with transposed(self._event, self):
             self._event.write(file)
 
@@ -720,7 +761,9 @@ class Symbol(Event):
     def extent(self):
         return Event._symbols[self._symbol][2]
 
-    def write(self, file):
+    def write(self, file=None):
+        if file is None:
+                file = Event._output_file
         Event.write_indent(file)
         print("{} # {}".format(Event._symbols[self._symbol][0], self._symbol), file=file)
 
@@ -746,7 +789,9 @@ class Loop(Event):
         else:
             return self._repeat * self._symbol_event.extent()
 
-    def write(self, file):
+    def write(self, file=None):
+        if file is None:
+                file = Event._output_file
         Event.write_indent(file)
         if self._repeat is None:
             print("while loop_test('{}')".format(self._symbol), file=file)
@@ -1075,14 +1120,14 @@ if __name__ == "__main__":
              Beat(extent="1/4", amplitude=1.),
              Rest("1/4")]
         )
-        e = Event.parse_events("c r c. c. c. r c_ c_ c r")
+        e = Event.parse("c r c. c. c. r c_ c_ c r")
         # print(e)
         # print(Sequence([e, f]))
         ## chords
         # print(Chord(intervals=[0, 4, 7], base="e", duration="1/4", amplitude=0.7).rotate(1))
         ##
         ## alle meine entchen
-        alle_mein_entchen = Event.parse_events("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1")
+        alle_mein_entchen = Event.parse("c' d' e' f' g'/2 g'/2 a' a' a' a' g'/1 a' a' a' a' g'/1 f' f' f' f' e'/2 e'/2 g' g' g' g' c'/1")
         scale = TonicScale(tonic="c'", pitches=["c", "d", "e", "f", "g", "a", "b", "c"])
         # print(scale)
         ##
