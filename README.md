@@ -6,3 +6,12 @@ For an easy start
  1. open [main.rb](./main.rb) in Sonic Pi
  1. adapt the path to 'song.rb' to the directory where you've just saved your music
  1. run [main.rb](./main.rb)
+## Look at the Music
+In the future I might add some simple export to music scores using [music21](http://web.mit.edu/music21/). For this to work you have to install music21 and [MuseScore](https://musescore.org/en) (also cross-platform, free and open source) and set up music21 to use MuseScore for producing visual output by executing the following Python code:
+```
+from music21 import *
+us = environment.UserSettings()
+us.create()  # create config file
+print(us.getSettingsPath())  # location of config file
+us['musescoreDirectPNGPath'] = '/usr/bin/mscore'  # output of `which mscore`
+```
