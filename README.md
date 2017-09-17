@@ -15,5 +15,9 @@ us.create()  # create config file
 print(us.getSettingsPath())  # location of config file
 us['musescoreDirectPNGPath'] = '/usr/bin/mscore'  # output of `which mscore`
 ```
+You can test whether it's working by executing something like this
+```
+converter.parse("tinynotation: 3/4 CC#16 d8 f g16 a g f# 4/4 c4 d8 f g16 a g f#").show()
+```
 ## The Name
 This library is called MusicTreequence because some aspects in music have a sequential nature (such as voice leading) and some are rather structured like trees (such as harmony). Since we somehow need a combination of both...you know...
