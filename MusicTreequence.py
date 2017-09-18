@@ -218,10 +218,10 @@ class Event:
 
     @staticmethod
     def reset():
-        _indent = 0
-        _beat = 1
-        _symbols = {}
-        _loops = set()
+        Event._indent = 0
+        Event._beat = 1
+        Event._symbols = {}
+        Event._loops = set()
 
     @staticmethod
     def write_indent(file):
@@ -499,7 +499,7 @@ class Beat(Event):
         # "ride": ":drum_cymbal_soft"
     }
 
-    def __init__(self, extent=0., amplitude=1., symbol=None, sound='click'):
+    def __init__(self, extent=0., amplitude=1., symbol=None, sound='tab'):
         super(Beat, self).__init__(transpose=0, scale=TonicScale())
         self._extent = extent
         self._amplitude = amplitude
@@ -617,9 +617,9 @@ class Sequence(Event):
                 tie_extent = 0
             with transposed(event, self):
                 event.write(file=file)
-            if event.is_atomic() and event.extent() > 0:
-                Event.write_indent(file)
-                Event.wait(time=event.extent(), file=file)
+                if event.is_atomic() and event.extent() > 0:
+                    Event.write_indent(file)
+                    Event.wait(time=event.extent(), file=file)
 
 
 class Measure(Sequence):
@@ -649,7 +649,7 @@ class Measure(Sequence):
             part_extent = extent / len(events)
             for idx, e in enumerate(events):
                 sequence.append(Measure(e, part_extent, unit=unit, nested_idx=list(nested_idx) + [idx]))
-        super(Measure, self).__init__(sequence, symbol=None, make_deepcopy=make_deepcopy)
+        super(Measure, self).__init__(sequence, symbol=symbol, make_deepcopy=make_deepcopy)
 
 
 class Parallel(Event):
