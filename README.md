@@ -1,5 +1,9 @@
 # MusicTreequence
 MusicTreequence is a Python library to code music. It provides an abstraction layer on top of [Sonic Pi](http://sonic-pi.net/), which in turn is a front end to [SuperCollider](http://supercollider.github.io/). MusicTreequence produces Ruby code that can be processes by Sonic Pi, that is, if you want to listen to what you've coded with MusicTreequence you have to install Sonic Pi, which is cross-platform, free and open source.
+## Installation
+To use MusicTreequence will need to install Python (MusicTreequence is developed for Python 3). The details of the installation procedure depend on your operating system. You might want to use a Python distribution like [Anaconda](https://anaconda.org/anaconda/python). A convenient way to start coding, especially if you are not familiar with Python, is to use the interactive Python shell [iPython](https://ipython.org/) especially through [Jupyter Notebook](http://jupyter.org/) browser-based interface. The [Tutorial](./Tutorial.ipynb), for instance, is such a notebook.
+
+To listen to the music generated with MusicTreequence you will need to install [Sonic Pi](http://sonic-pi.net/), which is a self-contained application independently of MusicTreequence.
 ## Listen to the Music
 For an easy start
  1. code some music (have a look at the small [Tutorial](./Tutorial.ipynb) for a start) and write it to a file called 'song.rb'
@@ -20,4 +24,4 @@ You can test whether it's working by executing something like this
 converter.parse("tinynotation: 3/4 CC#16 d8 f g16 a g f# 4/4 c4 d8 f g16 a g f#").show()
 ```
 ## The Name
-This library is called MusicTreequence because some aspects in music have a sequential nature (such as voice leading) and some are rather structured like trees (such as harmony). Since we somehow need a combination of both...you know...
+This library is called MusicTreequence because some aspects in music have a sequential nature (such as voice leading) and some are rather structured like trees (such as harmony). Since we somehow need a combination of both...well...
