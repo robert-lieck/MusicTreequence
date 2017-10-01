@@ -148,6 +148,14 @@ def repack_list(list_to_repack, package_sizes=()):
     return repack_list(repacked_list, package_sizes)
 
 
+def rotate(intervals, n):
+    intervals = list(intervals)
+    rot = n % len(intervals)
+    shift = n // len(intervals)
+    octaves = 1 + (max(intervals) - min(intervals)) // 12
+    rotated_intervals = intervals[rot:] + [i + 12 * octaves for i in intervals[:rot]]
+    return [i + 12 * shift for i in rotated_intervals]
+
 @contextmanager
 def write_song(file=None, print_to_std_out=False):
     Event.reset()
@@ -169,11 +177,15 @@ def write_song(file=None, print_to_std_out=False):
             with open(file, 'w') as song:
                 print(content.getvalue(), file=song)
 
-class BareScale:
 
-    def __init__(self, intervals=range(12), pitches=None):
+class TonicScale:
+
+    def __init__(self, tonic="c'", intervals=range(12), pitches=None):
         if pitches is not None:
+            self._tonic = pitches[0]
             intervals = [(to_MIDI_pitch(p) - to_MIDI_pitch(pitches[0])) % 12 for p in pitches]
+        else:
+            self._tonic = tonic
         self._intervals = np.array(sorted(np.unique(intervals)))
         if self._intervals[0] < 0:
             raise UserWarning("Scale cannot contain negative intervals.")
@@ -181,23 +193,10 @@ class BareScale:
             raise UserWarning("Scale cannot contain intervals of an octave or above.")
 
     def __repr__(self):
-        return str(self._intervals)
+        return str([to_MIDI_pitch(self._tonic) + i for i in self._intervals])
 
     def get_interval(self, scale_degree):
         return self._intervals[scale_degree % len(self._intervals)] + 12 * (scale_degree // len(self._intervals))
-
-
-class TonicScale(BareScale):
-
-    def __init__(self, tonic="c'", intervals=range(12), pitches=None):
-        super(TonicScale, self).__init__(intervals=intervals, pitches=pitches)
-        if pitches is not None:
-            self._tonic = pitches[0]
-        else:
-            self._tonic = tonic
-
-    def __repr__(self):
-        return str([to_MIDI_pitch(self._tonic) + i for i in self._intervals])
 
     def get_scale_degree(self, pitch):
         return np.argmin((self._intervals + to_MIDI_pitch(self._tonic) - to_MIDI_pitch(pitch)) % 12)
@@ -392,7 +391,6 @@ class Chord(Event):
                  scale=TonicScale()):
         super(Chord, self).__init__(transpose=transpose, scale=scale)
         self._intervals = list(sorted(intervals))
-        self._octaves = 1 + (max(self._intervals) - min(self._intervals)) // 12
         self._base = base
         self._duration = duration
         self._extent = duration if extent is None else extent
@@ -404,8 +402,7 @@ class Chord(Event):
 
     def __repr__(self):
         if Event._str_verbose:
-            return "Chord({}[{}]/{}+{}{}{} {}|{} {})".format(tuple(self._intervals),
-                                                             self._octaves,
+            return "Chord({}[{}]+{}{}{} {}|{} {})".format(tuple(self._intervals),
                                                              self._base,
                                                              self._transpose,
                                                              ("_" if self._tie else ""),
@@ -420,8 +417,13 @@ class Chord(Event):
                                         self._duration)
 
     def rotate(self, n):
-        self._intervals = self._intervals[n:] + [i + 12 * self._octaves for i in self._intervals[:n]]
+        self._intervals = rotate(self._intervals, n)
+        if np.any(np.array(self.get_pitches()) < min_pitch()) or np.any(np.array(self.get_pitches()) > max_pitch()):
+            raise UserWarning("pitches out of range: {}".format(self.get_pitches()))
         return self
+
+    def get_pitches(self):
+        return [i + to_MIDI_pitch(self._base) for i in self._intervals]
 
     def is_atomic(self):
         return True
@@ -499,7 +501,7 @@ class Beat(Event):
         # "ride": ":drum_cymbal_soft"
     }
 
-    def __init__(self, extent=0., amplitude=1., symbol=None, sound='tab'):
+    def __init__(self, extent='1/4', amplitude=1., symbol=None, sound='tab'):
         super(Beat, self).__init__(transpose=0, scale=TonicScale())
         self._extent = extent
         self._amplitude = amplitude
@@ -524,7 +526,7 @@ class Beat(Event):
 
 
 class Rest(Event):
-    def __init__(self, extent, symbol=None):
+    def __init__(self, extent='1/4', symbol=None):
         super(Rest, self).__init__(transpose=0, scale=TonicScale())
         self._extent = extent
         if symbol is not None:
