@@ -475,7 +475,7 @@ class Tone(Chord):
                  staccato=False,
                  transpose=0,
                  scale=TonicScale(),
-                 synth=":beep"):
+                 synth=None):
         super(Tone, self).__init__(base=pitch,
                                    intervals=[0],
                                    duration=duration,
