@@ -156,10 +156,14 @@ def rotate(intervals, n):
     rotated_intervals = intervals[rot:] + [i + 12 * octaves for i in intervals[:rot]]
     return [i + 12 * shift for i in rotated_intervals]
 
+
 @contextmanager
-def write_song(file=None, print_to_std_out=False):
+def write_song(file=None, print_to_std_out=False, add_code=""):
     Event.reset()
     with io.StringIO() as content:
+        print("# additional code", file=content)
+        print(add_code, file=content)
+        print("", file=content)
         Event._output_file = content
         print("# main function", file=content)
         print("def song", file=content)
@@ -388,7 +392,8 @@ class Chord(Event):
                  tie=False,
                  staccato=False,
                  transpose=0,
-                 scale=TonicScale()):
+                 scale=TonicScale(),
+                 synth=None):
         super(Chord, self).__init__(transpose=transpose, scale=scale)
         self._intervals = list(sorted(intervals))
         self._base = base
@@ -397,6 +402,7 @@ class Chord(Event):
         self._amplitude = amplitude
         self._tie = tie
         self._staccato = staccato
+        self._synth = synth
         if symbol is not None:
             self.create_symbol(symbol)
 
@@ -448,6 +454,10 @@ class Chord(Event):
                 pitch -= scale.get_interval(scale_degree=scale_degree)
                 pitch += scale.get_interval(scale_degree=scale_degree + transpose)
             Event.write_indent(file)
+            if self._synth is not None:
+                print("use_synth {}".format(self._synth),
+                      file=file)
+            Event.write_indent(file)
             print("play {}, attack: 0.01, decay: {}, sustain: 0.1, release: 0.1, amp: {}".format(pitch,
                                                                                                  duration,
                                                                                                  self._amplitude),
@@ -464,7 +474,8 @@ class Tone(Chord):
                  tie=False,
                  staccato=False,
                  transpose=0,
-                 scale=TonicScale()):
+                 scale=TonicScale(),
+                 synth=":beep"):
         super(Tone, self).__init__(base=pitch,
                                    intervals=[0],
                                    duration=duration,
@@ -474,7 +485,8 @@ class Tone(Chord):
                                    tie=tie,
                                    staccato=staccato,
                                    transpose=transpose,
-                                   scale=scale)
+                                   scale=scale,
+                                   synth=synth)
 
     def __repr__(self):
         if Event._str_verbose:
@@ -485,7 +497,32 @@ class Tone(Chord):
                                      self._duration)
 
 
-class Beat(Event):
+class Sound(Event):
+
+    def __init__(self, sound, extent='1/4', symbol=None, add_code=""):
+        super(Sound, self).__init__(transpose=0, scale=TonicScale())
+        self._extent = extent
+        self._sound = sound
+        self._add_code = add_code
+        if symbol is not None:
+            self.create_symbol(symbol)
+
+    def __repr__(self):
+        return "sound:{}:{}".format(self._sound, self._extent)
+
+    def is_atomic(self):
+        return True
+
+    def extent(self):
+        return Event.time_interval(self._extent)
+
+    def write(self, file=None):
+        if file is None:
+                file = Event._output_file
+        Event.write_indent(file)
+        print("sample {}{}".format(self._sound, self._add_code), file=file)
+
+class Beat(Sound):
     """
     Possible sounds are: "snare", "tab", "kick", "hh_c", "hh_o", "ride"
     """
@@ -502,27 +539,17 @@ class Beat(Event):
     }
 
     def __init__(self, extent='1/4', amplitude=1., symbol=None, sound='tab'):
-        super(Beat, self).__init__(transpose=0, scale=TonicScale())
-        self._extent = extent
+        super(Beat, self).__init__(sound=Beat.sounds[sound], extent=extent, symbol=symbol)
         self._amplitude = amplitude
-        self._sound = sound
-        if symbol is not None:
-            self.create_symbol(symbol)
 
     def __repr__(self):
-        return "beat:{}:{}".format(self._extent, self._amplitude)
-
-    def is_atomic(self):
-        return True
-
-    def extent(self):
-        return Event.time_interval(self._extent)
+        return "beat:{}:{},{}".format(self._sound, self._extent, self._amplitude)
 
     def write(self, file=None):
         if file is None:
                 file = Event._output_file
         Event.write_indent(file)
-        print("sample {}, amp: {}".format(self.sounds[self._sound], self._amplitude), file=file)
+        print("sample {}, amp: {}".format(self._sound, self._amplitude), file=file)
 
 
 class Rest(Event):
@@ -620,7 +647,6 @@ class Sequence(Event):
             with transposed(event, self):
                 event.write(file=file)
                 if event.is_atomic() and event.extent() > 0:
-                    Event.write_indent(file)
                     Event.wait(time=event.extent(), file=file)
 
 
@@ -648,7 +674,9 @@ class Measure(Sequence):
             sequence = [e]
         else:
             sequence = []
-            part_extent = extent / len(events)
+            part_extent = extent
+            if events:
+                part_extent /= len(events)
             for idx, e in enumerate(events):
                 sequence.append(Measure(e, part_extent, unit=unit, nested_idx=list(nested_idx) + [idx]))
         super(Measure, self).__init__(sequence, symbol=symbol, make_deepcopy=make_deepcopy)
