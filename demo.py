@@ -68,5 +68,5 @@ with write_song('song.rb', print_to_std_out=True):
             #     [[hh_c, rest, hh_c] * 2],
             # ] * 2, extent=8)
         ]),
-        symbol="main loop"
+        symbol="main_loop"
     ).write()
