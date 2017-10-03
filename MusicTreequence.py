@@ -889,14 +889,21 @@ class TimeSeriesModel:
                 self.insert_in_cache(h_tuple, dist)
         return dist
 
-    def sample(self, history):
-        dist = self.get_distribution(history)
-        try:
-            return np.random.choice(self._alphabet, p=dist)
-        except ValueError:
-            print("probabilities: {}".format(dist))
-            print("sum: {}".format(np.sum(dist)))
-            raise
+    def sample(self, history=(), steps=0, copy_history=True):
+        if copy_history:
+            history = list(deepcopy(history))
+        for idx in range(max(steps, 1)):
+            dist = self.get_distribution(history)
+            try:
+                history += [np.random.choice(self._alphabet, p=dist)]
+            except ValueError:
+                print("probabilities: {}".format(dist))
+                print("sum: {}".format(np.sum(dist)))
+                raise
+        if steps == 0:
+            return history[-1]
+        else:
+            return history
 
 
 class MarkovModel(TimeSeriesModel):
