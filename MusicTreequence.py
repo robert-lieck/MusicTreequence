@@ -906,6 +906,29 @@ class TimeSeriesModel:
             return history
 
 
+class FactorModel(TimeSeriesModel):
+
+    def __init__(self, alphabet, weights=(), factors=(), weight_factors=None, cache_size=1):
+        super(FactorModel, self).__init__(alphabet=alphabet, cache_size=cache_size)
+        self._normalize = True
+        if weight_factors is None:
+            if len(factors) != len(weights):
+                raise UserWarning("Unequal number of factors and weights ({}/{})".format(len(factors), len(weights)))
+            self._factors = factors
+            self._weights = weights
+        else:
+            if weights != () or factors != ():
+                raise UserWarning("Cannot handle both 'weight_factors' and 'weights' and 'factors' specified separately")
+            self._weights, self._factors = zip(*weight_factors)
+
+    def log_probability(self, history, event):
+        lin_comb = 0
+        for f, w in zip(self._factors, self._weights):
+            lin_comb += f(history, event) * w
+        return lin_comb
+
+    def probability(self, history, event):
+        return np.exp(self.log_probability(history=history, event=event))
 class MarkovModel(TimeSeriesModel):
 
     def __init__(self, alphabet, prior_counts=0):
