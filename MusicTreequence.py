@@ -325,6 +325,8 @@ class Event:
                     length = "1/" + vals[1]
                 if vals[0] == 'r' or vals[0] == 'R':
                     return Rest(length)
+                if vals[0][0:2].lower() == 'b:':
+                    return Beat(length, sound=vals[0][2:])
                 else:
                     pitch = vals[0]
                     tie = False
@@ -539,7 +541,8 @@ class Beat(Sound):
     }
 
     def __init__(self, extent='1/4', amplitude=1., symbol=None, sound='tab'):
-        super(Beat, self).__init__(sound=Beat.sounds[sound], extent=extent, symbol=symbol)
+        sound_sconicpi = Beat.sounds[sound] if sound in Beat.sounds else ':' + sound
+        super(Beat, self).__init__(sound=sound_sconicpi, extent=extent, symbol=symbol)
         self._amplitude = amplitude
 
     def __repr__(self):
