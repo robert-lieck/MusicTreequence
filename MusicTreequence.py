@@ -463,8 +463,8 @@ class Chord(Event):
                 scale_degree = scale.get_scale_degree(pitch=pitch)
                 pitch -= scale.get_interval(scale_degree=scale_degree)
                 pitch += scale.get_interval(scale_degree=scale_degree + transpose)
-            Event.write_indent(file)
             if self._synth is not None:
+                Event.write_indent(file)
                 print("use_synth {}".format(self._synth),
                       file=file)
             Event.write_indent(file)
