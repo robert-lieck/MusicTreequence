@@ -184,12 +184,22 @@ def write_song(file=None, print_to_std_out=False, add_code=""):
 
 class TonicScale:
 
-    def __init__(self, tonic="c'", intervals=range(12), pitches=None):
+    def __init__(self, tonic=None, intervals=range(12), pitches=None):
+        if isinstance(intervals, str):
+            if intervals == 'major':
+                intervals = [0, 2, 4, 5, 7, 9, 11]
+            elif intervals == 'minor':
+                intervals = [0, 2, 3, 5, 7, 8, 10]
+            else:
+                raise UserWarning("Unknown scale '{}' given as intervals parameter".format(intervals))
         if pitches is not None:
-            self._tonic = pitches[0]
+            if tonic is None:
+                self._tonic = pitches[0]
+            else:
+                self._tonic = tonic
             intervals = [(to_MIDI_pitch(p) - to_MIDI_pitch(pitches[0])) % 12 for p in pitches]
         else:
-            self._tonic = tonic
+            self._tonic = "c'" if tonic is None else tonic
         self._intervals = np.array(sorted(np.unique(intervals)))
         if self._intervals[0] < 0:
             raise UserWarning("Scale cannot contain negative intervals.")
