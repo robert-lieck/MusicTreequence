@@ -929,6 +929,8 @@ class FactorModel(TimeSeriesModel):
 
     def probability(self, history, event):
         return np.exp(self.log_probability(history=history, event=event))
+
+
 class MarkovModel(TimeSeriesModel):
 
     def __init__(self, alphabet, prior_counts=0):
