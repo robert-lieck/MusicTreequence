@@ -260,6 +260,11 @@ class Event:
             else:
                 # --> sec
                 return float(extent)
+        elif isinstance(extent, collections.Iterable) and not isinstance(extent, (str, bytes)):
+            s = 0
+            for ex in extent:
+                s += Event.time_interval(ex)
+            return s
         else:
             # return as is
             return extent
@@ -409,8 +414,8 @@ class Chord(Event):
         super(Chord, self).__init__(transpose=transpose, scale=scale)
         self._intervals = list(sorted(intervals))
         self._base = base
-        self._duration = duration
-        self._extent = duration if extent is None else extent
+        self._duration = [duration]
+        self._extent = [duration] if extent is None else [extent]
         self._amplitude = amplitude
         self._tie = tie
         self._staccato = staccato
@@ -513,7 +518,7 @@ class Sound(Event):
 
     def __init__(self, sound, extent='1/4', symbol=None, add_code=""):
         super(Sound, self).__init__(transpose=0, scale=TonicScale())
-        self._extent = extent
+        self._extent = [extent]
         self._sound = sound
         self._add_code = add_code
         if symbol is not None:
@@ -568,7 +573,7 @@ class Beat(Sound):
 class Rest(Event):
     def __init__(self, extent='1/4', symbol=None):
         super(Rest, self).__init__(transpose=0, scale=TonicScale())
-        self._extent = extent
+        self._extent = [extent]
         if symbol is not None:
             self.create_symbol(symbol)
 
@@ -607,11 +612,32 @@ class Sequence(Event):
 
     def __init__(self, sequence, symbol=None, transpose=0, scale=TonicScale(), make_deepcopy=True):
         super(Sequence, self).__init__(transpose=transpose, scale=scale)
-        # self._sequence = Sequence.flatten(sequence) # this triggers the bug from above on multiple iterations through sequence
-        self._sequence = list(Sequence.flatten(sequence))
-        if make_deepcopy:
-            for i in range(len(self._sequence)):
-                self._sequence[i] = deepcopy(self._sequence[i])
+        # # self._sequence = Sequence.flatten(sequence) # this triggers the bug from above on multiple iterations through sequence
+        # self._sequence = list(Sequence.flatten(sequence))
+        # if make_deepcopy:
+        #     for i in range(len(self._sequence)):
+        #         self._sequence[i] = deepcopy(self._sequence[i])
+        # flatten sequence and merge ties
+        self._sequence = []
+        tie_extent = []
+        flat_sequence = list(sequence)
+        for i in range(len(flat_sequence)):
+            if make_deepcopy:
+                event = deepcopy(flat_sequence[i])
+            if isinstance(event, Chord) \
+                    and event._tie \
+                    and i < len(flat_sequence) - 1 \
+                    and isinstance(flat_sequence[i + 1], Tone) \
+                    and flat_sequence[i + 1].get_pitches() == event.get_pitches():
+                tie_extent += event._extent
+                continue
+            else:
+                if tie_extent:
+                    event._duration += tie_extent
+                    event._extent += tie_extent
+                    tie_extent = []
+                self._sequence += [event]
+        # create symbol
         if symbol is not None:
             self.create_symbol(symbol)
 
@@ -646,11 +672,11 @@ class Sequence(Event):
         flat_sequence = list(self._sequence)
         for i in range(len(flat_sequence)):
             event = flat_sequence[i]
-            if isinstance(event, Tone) \
+            if isinstance(event, Chord) \
                     and event._tie \
                     and i < len(flat_sequence) - 1 \
                     and isinstance(flat_sequence[i+1], Tone) \
-                    and to_MIDI_pitch(flat_sequence[i+1]._pitch) == to_MIDI_pitch(event._pitch):
+                    and flat_sequence[i+1].get_pitches() == event.get_pitches():
                 tie_extent += event.extent()
                 continue
             if tie_extent > 0:
@@ -691,7 +717,7 @@ class Measure(Sequence):
             if events:
                 part_extent /= len(events)
             for idx, e in enumerate(events):
-                sequence.append(Measure(e, part_extent, unit=unit, nested_idx=list(nested_idx) + [idx]))
+                sequence.append(Measure(e, part_extent, unit=unit, nested_idx=list(nested_idx) + [idx])._sequence)
         super(Measure, self).__init__(sequence, symbol=symbol, make_deepcopy=make_deepcopy)
 
 
@@ -1157,6 +1183,18 @@ class TestModel(TimeSeriesModel):
 
 
 if __name__ == "__main__":
+
+    with write_song("song.rb", print_to_std_out=True):
+        # Sequence([Tone("a'", tie=True)] + [Tone("c'", tie=True)] * 7).write()
+        # Parallel([
+        #     Sequence([Tone("a'", tie=True)] + [Tone("c'", tie=True)] * 7),
+        #     Sequence([Tone("a'", tie=True)] + [Tone("c'", tie=True)] * 7),
+        # ]).write()
+        Measure([Tone("a'", tie=True), [Tone("c'", tie=True)] * 7], 4).write()
+        # Parallel([
+        #     Measure([Tone("a'", tie=True), [Tone("c'", tie=True)] * 7], 4),
+        #     Measure([Tone("a'", tie=True), [Tone("c'", tie=True)] * 7], 4),
+        # ]).write()
     with io.StringIO() as file:
         # create events and write to string-file
         Event.set_beat("80bpm")
