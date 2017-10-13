@@ -1098,6 +1098,7 @@ class MarkovModel(TimeSeriesModel):
                 return self._n_gram_counts[h_tuple] / self._count_sums[len(h_tuple)]
         return self._prior_counts / self._count_sums[1]
 
+
 class IntervalSeries(TimeSeriesModel):
 
     def __init__(self, intervals, time_delay=1, epsilon=0):
@@ -1243,6 +1244,23 @@ class BeamInference:
                     break
         # return most likely sequence
         return self._beams[0]
+
+
+class MCTS:
+
+    class Node:
+
+        def __init__(self, history, children=()):
+            self._history = history
+            self._children = children
+
+    def __init__(self, time_series_model):
+        self._model = time_series_model
+        self._root_node = None
+
+    def sample(self, history, steps=1):
+        self._root_node = MCTS.Node(history)
+
 
 
 class TestModel(TimeSeriesModel):
